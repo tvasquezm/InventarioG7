@@ -14,8 +14,7 @@ const seed_1 = require("./config/seed");
 const headers_middleware_1 = require("./middlewares/headers.middleware");
 const error_middleware_1 = require("./middlewares/error.middleware");
 const app = (0, express_1.default)();
-// CORREGIDO: Puerto mandatorio de la especificación es 3006
-const PORT = process.env.PORT || 3006;
+const PORT = process.env.PORT || 3000;
 /**
  * Middlewares
  */

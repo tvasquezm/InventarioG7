@@ -14,8 +14,7 @@ import { errorMiddleware } from "./middlewares/error.middleware";
 
 const app = express();
 
-// CORREGIDO: Puerto mandatorio de la especificación es 3006
-const PORT = process.env.PORT || 3006;
+const PORT = process.env.PORT || 3000;
 
 /**
  * Middlewares
