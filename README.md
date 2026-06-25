@@ -144,10 +144,13 @@ Importar en Postman → ajustar la variable de entorno con la URL (local `http:/
 
 Desplegado en **Render** (plan Free).
 
-- **URL pública:** _por completar tras el deploy_
+- **URL pública:** https://inventario-g7.onrender.com
+- **Documentación (Swagger):** https://inventario-g7.onrender.com/docs
+- **Health check:** https://inventario-g7.onrender.com/health
 - **Build:** `npm install && npm run build` · **Start:** `npm start` (o usando el `Dockerfile`).
 - Render inyecta su propia variable `PORT`; el servicio la respeta automáticamente.
 - ⚠️ En el plan Free el servicio se duerme tras inactividad: el primer request tras un rato puede tardar ~30–60s (cold start).
+- ⚠️ El store es **en memoria y compartido**: todos los consumidores pegan a la misma instancia y el estado se reinicia con cada cold start/redeploy.
 
 ---
 

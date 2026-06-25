@@ -2,12 +2,28 @@
   "info": {
     "_postman_id": "a7c7bd7d-74d7-4bc3-bf9c-2b5d4481b7a7",
     "name": "E2 - Inventory Service Mock (Grupo 7)",
-    "description": "Colección de pruebas automáticas para la Fase 2 del Servicio de Inventario. Incluye validaciones de headers, flujo idempotente, y el caso crítico de Concurrencia (Race Condition) por la última unidad disponible.",
+    "description": "Colección de pruebas automáticas para la Fase 2 del Servicio de Inventario. Incluye validaciones de headers, flujo idempotente, y el caso crítico de Concurrencia (Race Condition) por la última unidad disponible. Cada request tiene tests (pm.test) que afirman el resultado esperado: correr la colección completa y en orden con 'Run collection'.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
     {
       "name": "1. Listar Inventario Completo",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Responde 200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('Devuelve lista paginada (data + pagination)', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body).to.have.property('data').that.is.an('array');",
+              "  pm.expect(body).to.have.property('pagination');",
+              "});"
+            ]
+          }
+        }
+      ],
       "request": {
         "method": "GET",
         "header": [
@@ -28,6 +44,20 @@
     },
     {
       "name": "2. Error - Falta Header Obligatorio X-Consumer",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Rechaza la peticion sin X-Consumer (400)', () => pm.response.to.have.status(400));",
+              "pm.test('El codigo de error es INVALID_REQUEST', () => {",
+              "  pm.expect(pm.response.json().code).to.eql('INVALID_REQUEST');",
+              "});"
+            ]
+          }
+        }
+      ],
       "request": {
         "method": "GET",
         "header": [
@@ -43,6 +73,24 @@
     },
     {
       "name": "3. Obtener Stock de Producto Específico",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Responde 200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('Expone los campos de stock (incluye virtualStock)', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body).to.have.property('availableStock');",
+              "  pm.expect(body).to.have.property('reservedStock');",
+              "  pm.expect(body).to.have.property('totalStock');",
+              "  pm.expect(body).to.have.property('virtualStock');",
+              "});"
+            ]
+          }
+        }
+      ],
       "request": {
         "method": "GET",
         "header": [
@@ -59,6 +107,20 @@
     },
     {
       "name": "4. Reabastecer/Modificar Stock (Idempotente)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Responde 200 OK (aplica o reusa la operacion idempotente)', () => pm.response.to.have.status(200));",
+              "pm.test('Devuelve el inventario actualizado', () => {",
+              "  pm.expect(pm.response.json()).to.have.property('availableStock');",
+              "});"
+            ]
+          }
+        }
+      ],
       "request": {
         "method": "POST",
         "header": [
@@ -81,6 +143,23 @@
     },
     {
       "name": "5. Concurrencia - Pedido A Reserva Última Unidad (Éxito)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// 201 en una corrida fresca; 200 si se reejecuta (replay idempotente sobre el mismo estado en memoria).",
+              "pm.test('Pedido A obtiene la reserva (201 nueva / 200 replay)', () => {",
+              "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+              "});",
+              "pm.test('La reserva pertenece a ORD-CRITICO-01', () => {",
+              "  pm.expect(pm.response.json().orderId).to.eql('ORD-CRITICO-01');",
+              "});"
+            ]
+          }
+        }
+      ],
       "request": {
         "method": "POST",
         "header": [
@@ -103,6 +182,20 @@
     },
     {
       "name": "6. Concurrencia - Pedido B Compite Simultáneo (Rechazo 422)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Pedido B es rechazado por falta de stock (422)', () => pm.response.to.have.status(422));",
+              "pm.test('El codigo de error es OUT_OF_STOCK', () => {",
+              "  pm.expect(pm.response.json().code).to.eql('OUT_OF_STOCK');",
+              "});"
+            ]
+          }
+        }
+      ],
       "request": {
         "method": "POST",
         "header": [
@@ -125,6 +218,20 @@
     },
     {
       "name": "7. Confirmar Pago de Reserva de Pedido A",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Responde 200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('La reserva queda CONFIRMED', () => {",
+              "  pm.expect(pm.response.json().status).to.eql('CONFIRMED');",
+              "});"
+            ]
+          }
+        }
+      ],
       "request": {
         "method": "POST",
         "header": [
