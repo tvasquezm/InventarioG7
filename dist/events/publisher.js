@@ -21,7 +21,7 @@ class Publisher {
     publishReservationCreated(correlationId, reservation) {
         this.publish({
             eventId: crypto_1.default.randomUUID(),
-            eventType: "inventory.reserved",
+            eventType: "StockReserved",
             occurredAt: new Date().toISOString(),
             correlationId,
             payload: {
@@ -37,7 +37,7 @@ class Publisher {
     publishReservationConfirmed(correlationId, reservation) {
         this.publish({
             eventId: crypto_1.default.randomUUID(),
-            eventType: "inventory.confirmed",
+            eventType: "StockConfirmed",
             occurredAt: new Date().toISOString(),
             correlationId,
             payload: {
@@ -52,7 +52,7 @@ class Publisher {
     publishReservationReleased(correlationId, reservation) {
         this.publish({
             eventId: crypto_1.default.randomUUID(),
-            eventType: "inventory.released",
+            eventType: "StockReleased",
             occurredAt: new Date().toISOString(),
             correlationId,
             payload: {
@@ -67,7 +67,7 @@ class Publisher {
     publishStockRejected(correlationId, payload) {
         this.publish({
             eventId: crypto_1.default.randomUUID(),
-            eventType: "inventory.stock_rejected",
+            eventType: "StockRejected",
             occurredAt: new Date().toISOString(),
             correlationId,
             payload
@@ -77,13 +77,15 @@ class Publisher {
     publishStockChanged(productId, inventoryResponse, correlationId) {
         this.publish({
             eventId: crypto_1.default.randomUUID(),
-            eventType: "inventory.stock_changed",
+            eventType: "StockChanged",
             occurredAt: new Date().toISOString(),
             correlationId,
             payload: {
                 productId,
                 availableStock: inventoryResponse.availableStock,
-                reservedStock: inventoryResponse.reservedStock
+                totalStock: inventoryResponse.totalStock,
+                // virtualStock = stock vendible (lo que G3 debe reflejar en stockVisible)
+                virtualStock: inventoryResponse.virtualStock
             }
         });
     }

@@ -14,28 +14,24 @@ import { errorMiddleware } from "./middlewares/error.middleware";
 
 const app = express();
 
-const PORT = process.env.PORT || 3000;
+// Puerto mandatorio del estandar del curso es 3006.
+const PORT = process.env.PORT || 3006;
 
 /**
- * Middlewares
+ * Middlewares base
  */
 app.use(cors());
 app.use(express.json());
-app.use(headersMiddleware);
 
 /**
- * Datos semilla
+ * Rutas publicas (sin X-Consumer): health check y documentacion.
+ * Se montan ANTES del headersMiddleware para que el navegador
+ * pueda abrir /docs y Render pueda chequear /health sin headers.
  */
-loadSeedData();
+app.get("/health", (_req, res) => {
+  res.status(200).json({ status: "ok", service: "inventory-service" });
+});
 
-/**
- * Rutas
- */
-app.use("/", inventoryRoutes);
-
-/**
- * Swagger (/docs)
- */
 const openApiPath = path.join(
   __dirname,
   "../openapi/contrato-REST-inventario.yaml"
@@ -49,6 +45,21 @@ app.use(
   swaggerUi.serve,
   swaggerUi.setup(swaggerDocument)
 );
+
+/**
+ * A partir de aqui, todas las rutas exigen X-Consumer
+ */
+app.use(headersMiddleware);
+
+/**
+ * Datos semilla
+ */
+loadSeedData();
+
+/**
+ * Rutas de negocio
+ */
+app.use("/", inventoryRoutes);
 
 /**
  * Middleware global de errores
