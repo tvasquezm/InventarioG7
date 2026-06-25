@@ -1,0 +1,174 @@
+openapi: 3.0.3
+info:
+  title: Inventory Service API
+  version: "1.0.0"
+  description: |
+    Servicio REST de inventario del Grupo 7.
+    Actualmente expone endpoints de consulta de inventario en memoria.
+
+servers:
+  - url: http://localhost:3000
+    description: Desarrollo local
+
+tags:
+  - name: Inventory
+    description: Endpoints de consulta de inventario
+
+paths:
+  /inventory:
+    get:
+      tags:
+        - Inventory
+      summary: Listar inventario
+      description: Retorna el inventario paginado.
+      parameters:
+        - in: query
+          name: page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: Número de página
+        - in: query
+          name: size
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Tamaño de página
+      responses:
+        "200":
+          description: Inventario paginado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedInventory"
+        "400":
+          description: Parámetros inválidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inventory/{productId}:
+    get:
+      tags:
+        - Inventory
+      summary: Obtener inventario por productId
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+          description: Identificador del producto
+      responses:
+        "200":
+          description: Inventario encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryView"
+        "404":
+          description: Producto no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inventory/{productId}/stock:
+    get:
+      tags:
+        - Inventory
+      summary: Obtener stock de un producto
+      description: Retorna la misma vista de inventario del producto.
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+          description: Identificador del producto
+      responses:
+        "200":
+          description: Stock del producto
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryView"
+        "404":
+          description: Producto no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    InventoryView:
+      type: object
+      properties:
+        productId:
+          type: string
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        availableStock:
+          type: integer
+          example: 15
+        reservedStock:
+          type: integer
+          example: 0
+        totalStock:
+          type: integer
+          example: 15
+        virtualStock:
+          type: integer
+          example: 15
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        size:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 2
+        totalPages:
+          type: integer
+          example: 1
+
+    PaginatedInventory:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/InventoryView"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    ErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          example: "2026-06-24T20:00:00.000Z"
+        status:
+          type: integer
+          example: 404
+        code:
+          type: string
+          example: "PRODUCT_NOT_FOUND"
+        message:
+          type: string
+          example: "Product not found."
+        correlationId:
+          oneOf:
+            - type: string
+            - type: "null"

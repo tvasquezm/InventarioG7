@@ -1,0 +1,31 @@
+{
+  "name": "inventory-service",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "async-mutex": "^0.5.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "swagger-ui-express": "^5.0.1",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.0.0",
+    "@types/swagger-ui-express": "^4.1.8",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}
