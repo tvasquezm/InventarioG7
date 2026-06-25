@@ -138,6 +138,20 @@ Importar en Postman → ajustar la variable de entorno con la URL (local `http:/
 | `550e8400-e29b-41d4-a716-446655440000` | 15 |
 | `660e8400-e29b-41d4-a716-446655440111` | 1 (para la demo del último stock) |
 
+### Prueba de concurrencia (Race Condition)
+
+El script `scripts/concurrency-test.mjs` verifica el control de concurrencia disparando **N reservas en paralelo** por la última unidad del mismo producto. Como solo hay 1 unidad, el resultado esperado es **exactamente 1 reserva con éxito (`201`) y el resto rechazadas (`422 OUT_OF_STOCK`)** — sin sobreventa. Demuestra que el `async-mutex` serializa correctamente los accesos concurrentes.
+
+```bash
+# Contra el mock en Render (10 peticiones por defecto)
+node scripts/concurrency-test.mjs
+
+# Contra el mock local, indicando número de peticiones
+node scripts/concurrency-test.mjs http://localhost:3006 20
+```
+
+El script resetea el producto a 1 unidad (operación `SET`), lanza las reservas con `Promise.all` y afirma el resultado (sale con código 0 si pasa, 1 si falla).
+
 ---
 
 ## 🌐 Despliegue (mock público)
