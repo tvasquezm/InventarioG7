@@ -1,0 +1,155 @@
+{
+  "info": {
+    "_postman_id": "a7c7bd7d-74d7-4bc3-bf9c-2b5d4481b7a7",
+    "name": "E2 - Inventory Service Mock (Grupo 7)",
+    "description": "Colección de pruebas automáticas para la Fase 2 del Servicio de Inventario. Incluye validaciones de headers, flujo idempotente, y el caso crítico de Concurrencia (Race Condition) por la última unidad disponible.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Listar Inventario Completo",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Request-Id", "value": "{{$guid}}", "type": "text" },
+          { "key": "X-Correlation-Id", "value": "{{$guid}}", "type": "text" },
+          { "key": "X-Consumer", "value": "postman-test-client", "type": "text" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/inventory?page=1&size=10",
+          "host": ["{{baseUrl}}"],
+          "path": ["inventory"],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "size", "value": "10" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "2. Error - Falta Header Obligatorio X-Consumer",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Request-Id", "value": "{{$guid}}", "type": "text" },
+          { "key": "X-Correlation-Id", "value": "{{$guid}}", "type": "text" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/inventory",
+          "host": ["{{baseUrl}}"],
+          "path": ["inventory"]
+        }
+      }
+    },
+    {
+      "name": "3. Obtener Stock de Producto Específico",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-Request-Id", "value": "{{$guid}}", "type": "text" },
+          { "key": "X-Correlation-Id", "value": "{{$guid}}", "type": "text" },
+          { "key": "X-Consumer", "value": "postman-test-client", "type": "text" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/inventory/550e8400-e29b-41d4-a716-446655440000",
+          "host": ["{{baseUrl}}"],
+          "path": ["inventory", "550e8400-e29b-41d4-a716-446655440000"]
+        }
+      }
+    },
+    {
+      "name": "4. Reabastecer/Modificar Stock (Idempotente)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Request-Id", "value": "{{$guid}}", "type": "text" },
+          { "key": "X-Correlation-Id", "value": "{{$guid}}", "type": "text" },
+          { "key": "X-Consumer", "value": "postman-test-client", "type": "text" },
+          { "key": "Idempotency-Key", "value": "b5db0c7e-89a1-43ee-bc22-3cd2240974fa", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"quantity\": 5,\n  \"operation\": \"ADD\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/inventory/550e8400-e29b-41d4-a716-446655440000/stock",
+          "host": ["{{baseUrl}}"],
+          "path": ["inventory", "550e8400-e29b-41d4-a716-446655440000", "stock"]
+        }
+      }
+    },
+    {
+      "name": "5. Concurrencia - Pedido A Reserva Última Unidad (Éxito)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Request-Id", "value": "{{$guid}}", "type": "text" },
+          { "key": "X-Correlation-Id", "value": "{{$guid}}", "type": "text" },
+          { "key": "X-Consumer", "value": "order-service", "type": "text" },
+          { "key": "Idempotency-Key", "value": "fa1a2b2c-3d3e-4f4f-8a8b-9c9d9e9f0001", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"orderId\": \"ORD-CRITICO-01\",\n  \"items\": [\n    {\n      \"productId\": \"660e8400-e29b-41d4-a716-446655440111\",\n      \"quantity\": 1\n    }\n  ]\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/inventory/reserve",
+          "host": ["{{baseUrl}}"],
+          "path": ["inventory", "reserve"]
+        }
+      }
+    },
+    {
+      "name": "6. Concurrencia - Pedido B Compite Simultáneo (Rechazo 422)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Request-Id", "value": "{{$guid}}", "type": "text" },
+          { "key": "X-Correlation-Id", "value": "{{$guid}}", "type": "text" },
+          { "key": "X-Consumer", "value": "order-service", "type": "text" },
+          { "key": "Idempotency-Key", "value": "fa1a2b2c-3d3e-4f4f-8a8b-9c9d9e9f0002", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"orderId\": \"ORD-CRITICO-02\",\n  \"items\": [\n    {\n      \"productId\": \"660e8400-e29b-41d4-a716-446655440111\",\n      \"quantity\": 1\n    }\n  ]\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/inventory/reserve",
+          "host": ["{{baseUrl}}"],
+          "path": ["inventory", "reserve"]
+        }
+      }
+    },
+    {
+      "name": "7. Confirmar Pago de Reserva de Pedido A",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-Request-Id", "value": "{{$guid}}", "type": "text" },
+          { "key": "X-Correlation-Id", "value": "{{$guid}}", "type": "text" },
+          { "key": "X-Consumer", "value": "payment-service", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"orderId\": \"ORD-CRITICO-01\"\n}",
+          "options": { "raw": { "language": "json" } }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/inventory/confirm",
+          "host": ["{{baseUrl}}"],
+          "path": ["inventory", "confirm"]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3006",
+      "type": "string"
+    }
+  ]
+}

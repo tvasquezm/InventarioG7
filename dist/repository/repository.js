@@ -13,6 +13,7 @@ class Repository {
     reservationStore = new Map();
     idempotencyStore = new Map();
     processedEvents = new Set();
+    stockIdempotency = new Map();
     // ========================================
     // INVENTORY
     // ========================================
@@ -34,6 +35,29 @@ class Repository {
     deleteInventory(productId) {
         return this.inventoryStore.delete(productId);
     }
+    findStockIdempotencyKey(idempotencyKey) {
+        return this.stockIdempotency.get(idempotencyKey);
+    }
+    saveStockIdempotencyKey(idempotencyKey, record) {
+        this.stockIdempotency.set(idempotencyKey, record);
+    }
+    updateStock(productId, quantity, operation) {
+        const inventory = this.inventoryStore.get(productId);
+        if (!inventory) {
+            throw new Error("INVENTORY_NOT_FOUND");
+        }
+        if (operation === "SET") {
+            inventory.availableStock = quantity;
+            inventory.reservedStock = 0;
+        }
+        else {
+            inventory.availableStock += quantity;
+        }
+        inventory.version += 1;
+        inventory.updatedAt = new Date();
+        this.inventoryStore.set(productId, inventory);
+        return inventory;
+    }
     // ========================================
     // RESERVATIONS
     // ========================================
@@ -48,6 +72,18 @@ class Repository {
     }
     deleteReservation(orderId) {
         return this.reservationStore.delete(orderId);
+    }
+    findReservationByReservationId(reservationId) {
+        return Array
+            .from(this.reservationStore.values())
+            .find(reservation => reservation.reservationId === reservationId);
+    }
+    findReservationByIdempotencyKey(idempotencyKey) {
+        const reservationId = this.idempotencyStore.get(idempotencyKey);
+        if (!reservationId) {
+            return undefined;
+        }
+        return this.findReservationByReservationId(reservationId);
     }
     // ========================================
     // IDEMPOTENCY

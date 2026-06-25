@@ -19,6 +19,7 @@ export interface ReserveStockRequest {
   idempotencyKey: string;
   items: ReservationItem[];
   ttlMinutes?: number;
+  correlationId: string; // <-- AÑADIDO: Requerido por el estándar Fase 2
 }
 
 export interface ReserveStockResult {
@@ -54,7 +55,8 @@ export class ReservationService {
         orderId,
         idempotencyKey,
         items,
-        ttlMinutes = DEFAULT_RESERVATION_TTL_MINUTES
+        ttlMinutes = DEFAULT_RESERVATION_TTL_MINUTES,
+        correlationId // <-- AÑADIDO
       } = request;
 
       // ========================================
@@ -105,14 +107,22 @@ export class ReservationService {
 
       // ========================================
       // IDEMPOTENCIA
-      // Si ya existe una reserva para esta key,
-      // devolvemos la misma reserva.
       // ========================================
 
       const existingReservation =
         repository.findReservationByIdempotencyKey(idempotencyKey);
 
       if (existingReservation) {
+
+        // <-- AÑADIDO: Defensa contra secuestro de idempotencia (Fase 2)
+        if (existingReservation.orderId !== orderId) {
+          throw new ApiError(
+            409,
+            "IDEMPOTENCY_KEY_REUSED",
+            "Idempotency-Key already used for a different order."
+          );
+        }
+
         return {
           reservation: existingReservation,
           isIdempotentReplay: true
@@ -136,7 +146,6 @@ export class ReservationService {
 
       // ========================================
       // VALIDACIÓN TODO-O-NADA
-      // Primero revisamos TODO el stock sin modificar nada.
       // ========================================
 
       for (const item of items) {
@@ -151,6 +160,17 @@ export class ReservationService {
         }
 
         if (inventory.availableStock < item.quantity) {
+          
+          // <-- AÑADIDO: Avisar al ecosistema del rechazo (Fase 2)
+          publisher.publishStockRejected(
+            correlationId, 
+            { 
+              orderId, 
+              reason: `Insufficient stock for product ${item.productId}.`,
+              items 
+            }
+          );
+
           throw new ApiError(
             422,
             "OUT_OF_STOCK",
@@ -206,7 +226,8 @@ export class ReservationService {
         reservation.reservationId
       );
 
-      publisher.publishReservationCreated(reservation);
+      // <-- MODIFICADO: Inyectar correlationId para auditoría
+      publisher.publishReservationCreated(correlationId, reservation);
 
       return {
         reservation,
@@ -216,7 +237,8 @@ export class ReservationService {
   }
 
   async confirmReservation(
-    orderId: string
+    orderId: string,
+    correlationId: string // <-- AÑADIDO
   ): Promise<Reservation> {
 
     return reservationMutex.runExclusive(async () => {
@@ -288,14 +310,17 @@ export class ReservationService {
       reservation.updatedAt = new Date();
 
       repository.saveReservation(reservation);
-      publisher.publishReservationConfirmed(reservation);
+      
+      // <-- MODIFICADO: Inyectar correlationId
+      publisher.publishReservationConfirmed(correlationId, reservation);
 
       return reservation;
     });
   }
 
   async releaseReservation(
-    orderId: string
+    orderId: string,
+    correlationId: string // <-- AÑADIDO
   ): Promise<Reservation> {
 
     return reservationMutex.runExclusive(async () => {
@@ -368,7 +393,9 @@ export class ReservationService {
       reservation.updatedAt = new Date();
 
       repository.saveReservation(reservation);
-      publisher.publishReservationReleased(reservation);
+      
+      // <-- MODIFICADO: Inyectar correlationId
+      publisher.publishReservationReleased(correlationId, reservation);
 
       return reservation;
     });

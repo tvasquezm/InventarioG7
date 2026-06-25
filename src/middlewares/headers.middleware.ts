@@ -21,20 +21,23 @@ export function headersMiddleware(
     req.header("X-Consumer");
 
   if (!consumer) {
+    // CORREGIDO: Usar código estandarizado INVALID_REQUEST para el ecosistema
     next(
       new ApiError(
         400,
-        "MISSING_HEADER",
+        "INVALID_REQUEST",
         "Header X-Consumer is required."
       )
     );
     return;
   }
 
+  // Guardar en headers internos (en minúsculas para consistencia con Express)
   req.headers["x-request-id"] = requestId;
   req.headers["x-correlation-id"] = correlationId;
   req.headers["x-consumer"] = consumer;
 
+  // Responder reflejando los headers procesados
   res.setHeader("X-Request-Id", requestId);
   res.setHeader("X-Correlation-Id", correlationId);
   res.setHeader("X-Consumer", consumer);

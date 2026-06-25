@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { reservationService } from "../domain/reservations";
 import { repository } from "../repository/repository";
 import { ApiError } from "../middlewares/error.middleware";
+import { publisher } from "../events/publisher"; // <-- AÑADIDO: Para emitir StockChanged
 
 export class InventoryController {
 
@@ -133,132 +134,143 @@ export class InventoryController {
    * POST /inventory/:productId/stock
    */
   setStock(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void {
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): void {
 
-  try {
+    try {
 
-    const idempotencyKey =
-      req.header("Idempotency-Key");
+      const idempotencyKey =
+        req.header("Idempotency-Key");
 
-    if (
-      !idempotencyKey ||
-      idempotencyKey.trim().length === 0
-    ) {
-      throw new ApiError(
-        400,
-        "MISSING_IDEMPOTENCY_KEY",
-        "Idempotency-Key header is required."
-      );
-    }
+      // <-- AÑADIDO: Extraer trazabilidad
+      const correlationId = 
+        req.headers["x-correlation-id"] as string;
 
-    const rawProductId = req.params.productId;
-
-    if (
-      !rawProductId ||
-      Array.isArray(rawProductId)
-    ) {
-      throw new ApiError(
-        400,
-        "INVALID_PRODUCT_ID",
-        "Product ID is required."
-      );
-    }
-
-    const { quantity, operation } = req.body;
-
-    if (
-      typeof quantity !== "number" ||
-      quantity < 0
-    ) {
-      throw new ApiError(
-        400,
-        "INVALID_REQUEST",
-        "Quantity must be a number greater than or equal to 0."
-      );
-    }
-
-    if (
-      operation !== "SET" &&
-      operation !== "ADD"
-    ) {
-      throw new ApiError(
-        400,
-        "INVALID_REQUEST",
-        "Operation must be SET or ADD."
-      );
-    }
-
-    // ========================================
-    // IDEMPOTENCIA REAL
-    // Si esta key ya fue usada, devolvemos
-    // la misma respuesta sin volver a tocar stock.
-    // ========================================
-  
-  const existingRecord =
-  repository.findStockIdempotencyKey(idempotencyKey);
-
-if (existingRecord) {
-  const sameRequest =
-    existingRecord.productId === rawProductId &&
-    existingRecord.quantity === quantity &&
-    existingRecord.operation === operation;
-
-  if (!sameRequest) {
-    throw new ApiError(
-      409,
-      "IDEMPOTENCY_KEY_REUSED",
-      "Idempotency-Key was already used with a different stock operation."
-    );
-  }
-
-  res.status(200).json(existingRecord.response);
-  return;
-}
-
-    const inventory =
-      repository.getInventory(rawProductId);
-
-    if (!inventory) {
-      throw new ApiError(
-        404,
-        "PRODUCT_NOT_FOUND",
-        "Product not found."
-      );
-    }
-
-    const updatedInventory =
-      repository.updateStock(
-        rawProductId,
-        quantity,
-        operation
-      );
-
-    const response =
-      repository.toInventoryView(updatedInventory);
-
-    repository.saveStockIdempotencyKey(
-      idempotencyKey,
-      {
-        productId: rawProductId,
-        operation,
-        quantity,
-        response
+      if (
+        !idempotencyKey ||
+        idempotencyKey.trim().length === 0
+      ) {
+        throw new ApiError(
+          400,
+          "MISSING_IDEMPOTENCY_KEY",
+          "Idempotency-Key header is required."
+        );
       }
-    );
 
-    res.status(200).json(response);
+      const rawProductId = req.params.productId;
+
+      if (
+        !rawProductId ||
+        Array.isArray(rawProductId)
+      ) {
+        throw new ApiError(
+          400,
+          "INVALID_PRODUCT_ID",
+          "Product ID is required."
+        );
+      }
+
+      const { quantity, operation } = req.body;
+
+      if (
+        typeof quantity !== "number" ||
+        quantity < 0
+      ) {
+        throw new ApiError(
+          400,
+          "INVALID_REQUEST",
+          "Quantity must be a number greater than or equal to 0."
+        );
+      }
+
+      if (
+        operation !== "SET" &&
+        operation !== "ADD"
+      ) {
+        throw new ApiError(
+          400,
+          "INVALID_REQUEST",
+          "Operation must be SET or ADD."
+        );
+      }
+
+      // ========================================
+      // IDEMPOTENCIA REAL
+      // Si esta key ya fue usada, devolvemos
+      // la misma respuesta sin volver a tocar stock.
+      // ========================================
+      
+      const existingRecord =
+        repository.findStockIdempotencyKey(idempotencyKey);
+
+      if (existingRecord) {
+        const sameRequest =
+          existingRecord.productId === rawProductId &&
+          existingRecord.quantity === quantity &&
+          existingRecord.operation === operation;
+
+        if (!sameRequest) {
+          throw new ApiError(
+            409,
+            "IDEMPOTENCY_KEY_REUSED",
+            "Idempotency-Key was already used with a different stock operation."
+          );
+        }
+
+        res.status(200).json(existingRecord.response);
+        return;
+      }
+
+      const inventory =
+        repository.getInventory(rawProductId);
+
+      if (!inventory) {
+        throw new ApiError(
+          404,
+          "PRODUCT_NOT_FOUND",
+          "Product not found."
+        );
+      }
+
+      const updatedInventory =
+        repository.updateStock(
+          rawProductId,
+          quantity,
+          operation
+        );
+
+      const response =
+        repository.toInventoryView(updatedInventory);
+
+      repository.saveStockIdempotencyKey(
+        idempotencyKey,
+        {
+          productId: rawProductId,
+          operation,
+          quantity,
+          response
+        }
+      );
+
+      // <-- AÑADIDO: Publicar el evento obligatorio del ecosistema (Fase 2)
+      publisher.publishStockChanged(
+        rawProductId,
+        response,
+        correlationId
+      );
+
+      res.status(200).json(response);
+
+    }
+    catch (error) {
+
+      next(error);
+
+    }
 
   }
-  catch (error) {
-
-    next(error);
-
-  }
-
-}
 
   /**
    * POST /inventory/reserve
@@ -273,6 +285,10 @@ if (existingRecord) {
 
       const idempotencyKey =
         req.header("Idempotency-Key");
+
+      // <-- AÑADIDO: Extraer trazabilidad
+      const correlationId = 
+        req.headers["x-correlation-id"] as string;
 
       if (
         !idempotencyKey ||
@@ -294,7 +310,8 @@ if (existingRecord) {
         await reservationService.reserveStock({
           orderId,
           idempotencyKey,
-          items
+          items,
+          correlationId // <-- AÑADIDO: Pasar al dominio
         });
 
       const statusCode =
@@ -324,6 +341,10 @@ if (existingRecord) {
 
       const { orderId } = req.body;
 
+      // <-- AÑADIDO: Extraer trazabilidad
+      const correlationId = 
+        req.headers["x-correlation-id"] as string;
+
       if (
         !orderId ||
         typeof orderId !== "string" ||
@@ -337,7 +358,10 @@ if (existingRecord) {
       }
 
       const reservation =
-        await reservationService.confirmReservation(orderId);
+        await reservationService.confirmReservation(
+          orderId,
+          correlationId // <-- AÑADIDO: Pasar al dominio
+        );
 
       res.status(200).json(reservation);
 
@@ -361,6 +385,10 @@ if (existingRecord) {
 
       const { orderId } = req.body;
 
+      // <-- AÑADIDO: Extraer trazabilidad
+      const correlationId = 
+        req.headers["x-correlation-id"] as string;
+
       if (
         !orderId ||
         typeof orderId !== "string" ||
@@ -374,7 +402,10 @@ if (existingRecord) {
       }
 
       const reservation =
-        await reservationService.releaseReservation(orderId);
+        await reservationService.releaseReservation(
+          orderId,
+          correlationId // <-- AÑADIDO: Pasar al dominio
+        );
 
       res.status(200).json(reservation);
 

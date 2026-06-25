@@ -1,0 +1,2274 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.env.example
+.gitignore
+Dockerfile
+openapi/contrato-REST-inventario-original.yaml
+openapi/contrato-REST-inventario.yaml
+package.json
+postman/inventory.postman_collection.json
+README.md
+src/config/seed.ts
+src/controllers/inventory.controller.ts
+src/domain/reservations.ts
+src/events/publisher.ts
+src/index.ts
+src/middlewares/error.middleware.ts
+src/middlewares/headers.middleware.ts
+src/repository/repository.ts
+src/routes/inventory.routes.ts
+tsconfig.json
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path=".env.example">
+
+</file>
+
+<file path=".gitignore">
+
+</file>
+
+<file path="Dockerfile">
+
+</file>
+
+<file path="openapi/contrato-REST-inventario-original.yaml">
+openapi: 3.0.3
+info:
+  title: Inventory Service API
+  description: |
+    Servicio de **Inventario y Concurrencia** del ecosistema Mini Marketplace Cloud
+    (Grupo 7). Es la única autoridad sobre el stock de los productos: gestiona la
+    consulta, carga/reposición, reserva, liberación y confirmación de existencias,
+    garantizando la consistencia bajo accesos concurrentes.
+
+    Resuelve de forma explícita los desafíos de concurrencia mediante **lock
+    optimista** (actualización condicional del stock: `UPDATE ... WHERE stock > 0`)
+    e **idempotencia** por `Idempotency-Key`, evitando la sobreventa cuando varios
+    pedidos compiten por las últimas unidades disponibles.
+
+    **Stack:** Node.js (Express) · Supabase Postgres · Supabase Realtime (canal `inventory.events`) · Render Free.
+
+    > Documento de la Fase 1 (diseño de contratos). El esquema OpenAPI se sirve con
+    > `swagger-ui-express` en la ruta `/docs`.
+
+    **Eventos que publica** (ver contrato de eventos): `StockReserved`,
+    `StockRejected`, `StockConfirmed`, `StockReleased`, `StockChanged`.
+    **Eventos que consume:** `ProductCreated` (de G3, inicializa el inventario de un
+    producto nuevo en 0), `OrderCreated` (de G5, dispara la reserva del pedido),
+    `PaymentApproved` y `PaymentRejected` (de G6, confirman o liberan la reserva).
+    Cruce por `orderId`, idempotencia por `eventId`.
+  version: "1.0"
+  contact:
+    name: Grupo 7 - Inventario
+
+servers:
+  - url: https://inventory-service.onrender.com
+    description: Producción (cloud free)
+  - url: http://localhost:8000
+    description: Desarrollo local
+
+tags:
+  - name: Inventory
+    description: Consulta y carga de stock
+  - name: Reservations
+    description: Reserva, confirmación y liberación de stock
+
+paths:
+  /inventory:
+    get:
+      tags: [Inventory]
+      summary: Listar inventario (paginado)
+      description: >
+        Lista el stock de todos los productos, paginado. Pensado para que
+        Reportería (G10) y el Chatbot (G11) consulten el inventario por REST sin
+        pedir producto por producto. La verdad del stock siempre es esta API
+        (el `stockVisible` de G3 es referencial).
+      operationId: listInventory
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      responses:
+        '200':
+          description: Lista paginada del inventario
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedInventory'
+              example:
+                data:
+                  - productId: 550e8400-e29b-41d4-a716-446655440000
+                    availableStock: 13
+                    reservedStock: 2
+                    totalStock: 15
+                    virtualStock: 13
+                  - productId: 660e8400-e29b-41d4-a716-446655440111
+                    availableStock: 0
+                    reservedStock: 0
+                    totalStock: 0
+                    virtualStock: 0
+                pagination:
+                  page: 1
+                  size: 20
+                  total: 2
+                  totalPages: 1
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /inventory/{productId}:
+    get:
+      tags: [Inventory]
+      summary: Consultar stock de un producto
+      operationId: getInventory
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      responses:
+        '200':
+          description: Stock encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryView'
+              example:
+                productId: 550e8400-e29b-41d4-a716-446655440000
+                availableStock: 1
+                reservedStock: 0
+                totalStock: 1
+                virtualStock: 1
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /inventory/{productId}/stock:
+    post:
+      tags: [Inventory]
+      summary: Cargar o reponer stock de un producto
+      description: >
+        Operación del rol vendedor/administrador. `SET` fija el stock total a un
+        valor; `ADD` lo incrementa (reposición). Es la única vía para que el stock
+        entre al sistema. Requiere `Idempotency-Key` para que una reposición no se
+        aplique dos veces. Publica el evento `StockChanged`.
+      operationId: setStock
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetStockRequest'
+            example:
+              quantity: 50
+              operation: SET
+      responses:
+        '200':
+          description: Stock actualizado. (Publica evento StockChanged)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryView'
+              example:
+                productId: 550e8400-e29b-41d4-a716-446655440000
+                availableStock: 50
+                reservedStock: 0
+                totalStock: 50
+                virtualStock: 50
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /inventory/reserve:
+    post:
+      tags: [Reservations]
+      summary: Reservar stock para un pedido (lote, idempotente)
+      description: >
+        Reserva el stock de TODOS los items del pedido de forma atómica
+        (todo-o-nada): si falta stock de cualquier producto, no se reserva ninguno
+        y se responde 422. La reserva tiene una expiración (TTL, ej. 15 min); si el
+        pago no se confirma a tiempo, se libera automáticamente. La idempotencia se
+        controla con `Idempotency-Key` (una por pedido).
+        Publica `StockReserved` si tiene éxito, o `StockRejected` si falta stock.
+
+        Esta es la operación donde se resuelve el caso crítico de concurrencia:
+        ante dos reservas casi simultáneas por la última unidad, solo una tiene
+        éxito (UPDATE condicional con validación de filas afectadas).
+      operationId: reserveStock
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReserveRequest'
+            example:
+              orderId: ORD-1001
+              items:
+                - productId: 550e8400-e29b-41d4-a716-446655440000
+                  quantity: 2
+                - productId: 660e8400-e29b-41d4-a716-446655440111
+                  quantity: 1
+      responses:
+        '201':
+          description: Reserva creada para el pedido. (Publica evento StockReserved)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+              example:
+                reservationId: RES-2001
+                orderId: ORD-1001
+                status: RESERVED
+                items:
+                  - productId: 550e8400-e29b-41d4-a716-446655440000
+                    quantity: 2
+                    availableStock: 13
+                  - productId: 660e8400-e29b-41d4-a716-446655440111
+                    quantity: 1
+                    availableStock: 0
+                expiresAt: "2026-06-17T15:05:00Z"
+        '200':
+          description: >
+            Idempotencia: el `Idempotency-Key` ya fue procesado con éxito.
+            Se devuelve la reserva original sin crear una nueva.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          description: >
+            Stock insuficiente para uno o más items (no se reservó nada).
+            (Publica evento StockRejected)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                timestamp: "2026-06-17T14:32:10Z"
+                status: 422
+                code: OUT_OF_STOCK
+                message: "Sin stock suficiente para el producto 660e8400-e29b-41d4-a716-446655440111"
+                correlationId: abc-124
+
+  /inventory/confirm:
+    post:
+      tags: [Reservations]
+      summary: Confirmar la reserva de un pedido (descuento definitivo)
+      description: >
+        Convierte la reserva en descuento definitivo (el stock reservado sale del
+        total). Se llama típicamente al recibir `PaymentApproved`. Idempotente:
+        confirmar dos veces el mismo pedido devuelve 200 sin doble descuento.
+        Publica `StockConfirmed`.
+      operationId: confirmReservation
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderRef'
+            example:
+              orderId: ORD-1001
+      responses:
+        '200':
+          description: Reserva confirmada. (Publica evento StockConfirmed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /inventory/release:
+    post:
+      tags: [Reservations]
+      summary: Liberar la reserva de un pedido
+      description: >
+        Devuelve el stock reservado al disponible. Se llama al recibir
+        `PaymentRejected`, al cancelar el pedido, o automáticamente cuando la
+        reserva expira (TTL). Idempotente. Publica `StockReleased`.
+      operationId: releaseReservation
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XCorrelationId'
+        - $ref: '#/components/parameters/XConsumer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderRef'
+            example:
+              orderId: ORD-1001
+      responses:
+        '200':
+          description: Reserva liberada. (Publica evento StockReleased)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+components:
+  parameters:
+    ProductId:
+      name: productId
+      in: path
+      required: true
+      description: UUID del producto (identidad definida por el Catálogo, Grupo 3).
+      schema:
+        type: string
+        format: uuid
+        example: 550e8400-e29b-41d4-a716-446655440000
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: UUID que garantiza que la operación no se procese dos veces.
+      schema:
+        type: string
+        format: uuid
+    XRequestId:
+      name: X-Request-Id
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+    XCorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: true
+      description: Identificador de correlación para trazabilidad entre servicios.
+      schema:
+        type: string
+        format: uuid
+    XConsumer:
+      name: X-Consumer
+      in: header
+      required: true
+      description: Servicio/grupo que realiza la llamada.
+      schema:
+        type: string
+        example: order-service
+    Page:
+      name: page
+      in: query
+      required: false
+      description: Número de página (1-based).
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Size:
+      name: size
+      in: query
+      required: false
+      description: Cantidad de elementos por página.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  schemas:
+    InventoryView:
+      type: object
+      properties:
+        productId:
+          type: string
+          format: uuid
+        availableStock:
+          type: integer
+          minimum: 0
+          description: Unidades libres para reservar. Coincide con virtualStock.
+        reservedStock:
+          type: integer
+          minimum: 0
+          description: Unidades apartadas por reservas activas (esperando confirmación de pago).
+        totalStock:
+          type: integer
+          minimum: 0
+          description: Stock físico en bodega = availableStock + reservedStock.
+        virtualStock:
+          type: integer
+          minimum: 0
+          description: >-
+            Stock virtual vendible = totalStock - reservedStock. Es el stock
+            realmente disponible para vender (descuenta lo reservado que aún
+            espera confirmación de pago). Coincide con availableStock; se expone
+            aparte para dejar explícito el concepto de stock virtual.
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        size:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          description: Total de productos en inventario.
+          example: 2
+        totalPages:
+          type: integer
+          example: 1
+
+    PaginatedInventory:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/InventoryView'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    SetStockRequest:
+      type: object
+      required: [quantity, operation]
+      properties:
+        quantity:
+          type: integer
+          minimum: 0
+          example: 50
+        operation:
+          type: string
+          enum: [SET, ADD]
+          description: SET fija el total; ADD repone (incrementa).
+
+    ReserveItem:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+
+    ReserveRequest:
+      type: object
+      required: [orderId, items]
+      properties:
+        orderId:
+          type: string
+          description: Pedido al que pertenece la reserva (lo asigna el Grupo 5).
+          example: ORD-1001
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ReserveItem'
+
+    OrderRef:
+      type: object
+      required: [orderId]
+      properties:
+        orderId:
+          type: string
+          example: ORD-1001
+
+    ReservationItem:
+      type: object
+      properties:
+        productId:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+        availableStock:
+          type: integer
+          description: Stock disponible restante tras la operación.
+
+    Reservation:
+      type: object
+      properties:
+        reservationId:
+          type: string
+        orderId:
+          type: string
+        status:
+          type: string
+          enum: [RESERVED, CONFIRMED, RELEASED, EXPIRED]
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReservationItem'
+        expiresAt:
+          type: string
+          format: date-time
+          description: Momento en que la reserva expira si no se confirma (TTL).
+
+    Error:
+      type: object
+      required: [timestamp, status, code, message, correlationId]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+        code:
+          type: string
+        message:
+          type: string
+        correlationId:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Petición inválida
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            timestamp: "2026-06-17T14:32:10Z"
+            status: 400
+            code: INVALID_REQUEST
+            message: La cantidad debe ser mayor o igual a 0
+            correlationId: abc-123
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            timestamp: "2026-06-17T14:32:10Z"
+            status: 404
+            code: PRODUCT_NOT_FOUND
+            message: El producto indicado no existe en inventario
+            correlationId: abc-123
+    Conflict:
+      description: Conflicto de estado o idempotencia
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            timestamp: "2026-06-17T14:32:10Z"
+            status: 409
+            code: RESERVATION_NOT_ACTIVE
+            message: La reserva del pedido ORD-1001 no está en estado RESERVED
+            correlationId: abc-123
+</file>
+
+<file path="openapi/contrato-REST-inventario.yaml">
+openapi: 3.0.3
+info:
+  title: Inventory Service API
+  version: "1.0.0"
+  description: |
+    Servicio REST de inventario del Grupo 7.
+    Actualmente expone endpoints de consulta de inventario en memoria.
+
+servers:
+  - url: http://localhost:3000
+    description: Desarrollo local
+
+tags:
+  - name: Inventory
+    description: Endpoints de consulta de inventario
+
+paths:
+  /inventory:
+    get:
+      tags:
+        - Inventory
+      summary: Listar inventario
+      description: Retorna el inventario paginado.
+      parameters:
+        - in: query
+          name: page
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: Número de página
+        - in: query
+          name: size
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Tamaño de página
+      responses:
+        "200":
+          description: Inventario paginado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedInventory"
+        "400":
+          description: Parámetros inválidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inventory/{productId}:
+    get:
+      tags:
+        - Inventory
+      summary: Obtener inventario por productId
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+          description: Identificador del producto
+      responses:
+        "200":
+          description: Inventario encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryView"
+        "404":
+          description: Producto no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inventory/{productId}/stock:
+    get:
+      tags:
+        - Inventory
+      summary: Obtener stock de un producto
+      description: Retorna la misma vista de inventario del producto.
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+          description: Identificador del producto
+      responses:
+        "200":
+          description: Stock del producto
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryView"
+        "404":
+          description: Producto no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    InventoryView:
+      type: object
+      properties:
+        productId:
+          type: string
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        availableStock:
+          type: integer
+          example: 15
+        reservedStock:
+          type: integer
+          example: 0
+        totalStock:
+          type: integer
+          example: 15
+        virtualStock:
+          type: integer
+          example: 15
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        size:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 2
+        totalPages:
+          type: integer
+          example: 1
+
+    PaginatedInventory:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/InventoryView"
+        pagination:
+          $ref: "#/components/schemas/Pagination"
+
+    ErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          example: "2026-06-24T20:00:00.000Z"
+        status:
+          type: integer
+          example: 404
+        code:
+          type: string
+          example: "PRODUCT_NOT_FOUND"
+        message:
+          type: string
+          example: "Product not found."
+        correlationId:
+          oneOf:
+            - type: string
+            - type: "null"
+</file>
+
+<file path="package.json">
+{
+  "name": "inventory-service",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "async-mutex": "^0.5.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "swagger-ui-express": "^5.0.1",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.0.0",
+    "@types/swagger-ui-express": "^4.1.8",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}
+</file>
+
+<file path="postman/inventory.postman_collection.json">
+
+</file>
+
+<file path="README.md">
+
+</file>
+
+<file path="src/config/seed.ts">
+import { repository, Inventory } from "../repository/repository";
+
+export function loadSeedData(): void {
+
+  const now = new Date();
+
+  const products: Inventory[] = [
+    {
+      productId: "550e8400-e29b-41d4-a716-446655440000",
+      availableStock: 15,
+      reservedStock: 0,
+      version: 1,
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      productId: "660e8400-e29b-41d4-a716-446655440111",
+      availableStock: 1,
+      reservedStock: 0,
+      version: 1,
+      createdAt: now,
+      updatedAt: now
+    }
+  ];
+
+  for (const product of products) {
+    repository.createInventory(product);
+  }
+
+  console.log("✓ Inventory seed loaded");
+}
+</file>
+
+<file path="src/controllers/inventory.controller.ts">
+import { Request, Response, NextFunction } from "express";
+import { reservationService } from "../domain/reservations";
+import { repository } from "../repository/repository";
+import { ApiError } from "../middlewares/error.middleware";
+
+export class InventoryController {
+
+  /**
+   * GET /inventory
+   */
+  getInventory(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): void {
+
+    try {
+
+      const page =
+        Number(req.query.page ?? 1);
+
+      const size =
+        Number(req.query.size ?? 20);
+
+      if (
+        page < 1 ||
+        size < 1 ||
+        size > 100
+      ) {
+        throw new ApiError(
+          400,
+          "INVALID_REQUEST",
+          "Invalid pagination parameters."
+        );
+      }
+
+      const inventory =
+        repository.listInventory();
+
+      const start =
+        (page - 1) * size;
+
+      const data =
+        inventory
+          .slice(start, start + size)
+          .map(item =>
+            repository.toInventoryView(item)
+          );
+
+      res.status(200).json({
+        data,
+        pagination: {
+          page,
+          size,
+          total: inventory.length,
+          totalPages: Math.ceil(
+            inventory.length / size
+          )
+        }
+      });
+
+    }
+    catch (error) {
+      next(error);
+    }
+
+  }
+
+  /**
+   * GET /inventory/:productId
+   */
+  getInventoryByProductId(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): void {
+
+    try {
+
+      const rawProductId = req.params.productId;
+
+      if (
+        !rawProductId ||
+        Array.isArray(rawProductId)
+      ) {
+        throw new ApiError(
+          400,
+          "INVALID_PRODUCT_ID",
+          "Product ID is required."
+        );
+      }
+
+      const inventory =
+        repository.getInventory(rawProductId);
+
+      if (!inventory) {
+        throw new ApiError(
+          404,
+          "PRODUCT_NOT_FOUND",
+          "Product not found."
+        );
+      }
+
+      res.status(200).json(
+        repository.toInventoryView(inventory)
+      );
+
+    }
+    catch (error) {
+      next(error);
+    }
+
+  }
+
+  /**
+   * GET /inventory/:productId/stock
+   */
+  getStock(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): void {
+
+    this.getInventoryByProductId(
+      req,
+      res,
+      next
+    );
+
+  }
+
+  /**
+   * POST /inventory/:productId/stock
+   */
+  setStock(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+
+  try {
+
+    const idempotencyKey =
+      req.header("Idempotency-Key");
+
+    if (
+      !idempotencyKey ||
+      idempotencyKey.trim().length === 0
+    ) {
+      throw new ApiError(
+        400,
+        "MISSING_IDEMPOTENCY_KEY",
+        "Idempotency-Key header is required."
+      );
+    }
+
+    const rawProductId = req.params.productId;
+
+    if (
+      !rawProductId ||
+      Array.isArray(rawProductId)
+    ) {
+      throw new ApiError(
+        400,
+        "INVALID_PRODUCT_ID",
+        "Product ID is required."
+      );
+    }
+
+    const { quantity, operation } = req.body;
+
+    if (
+      typeof quantity !== "number" ||
+      quantity < 0
+    ) {
+      throw new ApiError(
+        400,
+        "INVALID_REQUEST",
+        "Quantity must be a number greater than or equal to 0."
+      );
+    }
+
+    if (
+      operation !== "SET" &&
+      operation !== "ADD"
+    ) {
+      throw new ApiError(
+        400,
+        "INVALID_REQUEST",
+        "Operation must be SET or ADD."
+      );
+    }
+
+    // ========================================
+    // IDEMPOTENCIA REAL
+    // Si esta key ya fue usada, devolvemos
+    // la misma respuesta sin volver a tocar stock.
+    // ========================================
+  
+  const existingRecord =
+  repository.findStockIdempotencyKey(idempotencyKey);
+
+if (existingRecord) {
+  const sameRequest =
+    existingRecord.productId === rawProductId &&
+    existingRecord.quantity === quantity &&
+    existingRecord.operation === operation;
+
+  if (!sameRequest) {
+    throw new ApiError(
+      409,
+      "IDEMPOTENCY_KEY_REUSED",
+      "Idempotency-Key was already used with a different stock operation."
+    );
+  }
+
+  res.status(200).json(existingRecord.response);
+  return;
+}
+
+    const inventory =
+      repository.getInventory(rawProductId);
+
+    if (!inventory) {
+      throw new ApiError(
+        404,
+        "PRODUCT_NOT_FOUND",
+        "Product not found."
+      );
+    }
+
+    const updatedInventory =
+      repository.updateStock(
+        rawProductId,
+        quantity,
+        operation
+      );
+
+    const response =
+      repository.toInventoryView(updatedInventory);
+
+    repository.saveStockIdempotencyKey(
+      idempotencyKey,
+      {
+        productId: rawProductId,
+        operation,
+        quantity,
+        response
+      }
+    );
+
+    res.status(200).json(response);
+
+  }
+  catch (error) {
+
+    next(error);
+
+  }
+
+}
+
+  /**
+   * POST /inventory/reserve
+   */
+  async reserve(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+
+    try {
+
+      const idempotencyKey =
+        req.header("Idempotency-Key");
+
+      if (
+        !idempotencyKey ||
+        idempotencyKey.trim().length === 0
+      ) {
+        throw new ApiError(
+          400,
+          "MISSING_IDEMPOTENCY_KEY",
+          "Idempotency-Key header is required."
+        );
+      }
+
+      const {
+        orderId,
+        items
+      } = req.body;
+
+      const result =
+        await reservationService.reserveStock({
+          orderId,
+          idempotencyKey,
+          items
+        });
+
+      const statusCode =
+        result.isIdempotentReplay ? 200 : 201;
+
+      res
+        .status(statusCode)
+        .json(result.reservation);
+
+    }
+    catch (error) {
+      next(error);
+    }
+
+  }
+
+  /**
+   * POST /inventory/confirm
+   */
+  async confirmReservation(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+
+    try {
+
+      const { orderId } = req.body;
+
+      if (
+        !orderId ||
+        typeof orderId !== "string" ||
+        orderId.trim().length === 0
+      ) {
+        throw new ApiError(
+          400,
+          "INVALID_ORDER_ID",
+          "orderId is required."
+        );
+      }
+
+      const reservation =
+        await reservationService.confirmReservation(orderId);
+
+      res.status(200).json(reservation);
+
+    }
+    catch (error) {
+      next(error);
+    }
+
+  }
+
+  /**
+   * POST /inventory/release
+   */
+  async releaseReservation(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+
+    try {
+
+      const { orderId } = req.body;
+
+      if (
+        !orderId ||
+        typeof orderId !== "string" ||
+        orderId.trim().length === 0
+      ) {
+        throw new ApiError(
+          400,
+          "INVALID_ORDER_ID",
+          "orderId is required."
+        );
+      }
+
+      const reservation =
+        await reservationService.releaseReservation(orderId);
+
+      res.status(200).json(reservation);
+
+    }
+    catch (error) {
+      next(error);
+    }
+
+  }
+}
+
+export const inventoryController =
+  new InventoryController();
+</file>
+
+<file path="src/domain/reservations.ts">
+import crypto from "crypto";
+import { Mutex } from "async-mutex";
+import { publisher } from "../events/publisher";
+
+import {
+  repository,
+  Reservation,
+  ReservationItem
+} from "../repository/repository";
+
+import { ApiError } from "../middlewares/error.middleware";
+
+// ========================================
+// TIPOS DE ENTRADA / SALIDA
+// ========================================
+
+export interface ReserveStockRequest {
+  orderId: string;
+  idempotencyKey: string;
+  items: ReservationItem[];
+  ttlMinutes?: number;
+}
+
+export interface ReserveStockResult {
+  reservation: Reservation;
+  isIdempotentReplay: boolean;
+}
+
+// ========================================
+// MUTEX GLOBAL DEL DOMINIO
+// ========================================
+
+const reservationMutex = new Mutex();
+
+// ========================================
+// CONFIG
+// ========================================
+
+const DEFAULT_RESERVATION_TTL_MINUTES = 15;
+
+// ========================================
+// SERVICE
+// ========================================
+
+export class ReservationService {
+
+  async reserveStock(
+    request: ReserveStockRequest
+  ): Promise<ReserveStockResult> {
+
+    return reservationMutex.runExclusive(async () => {
+
+      const {
+        orderId,
+        idempotencyKey,
+        items,
+        ttlMinutes = DEFAULT_RESERVATION_TTL_MINUTES
+      } = request;
+
+      // ========================================
+      // VALIDACIONES BÁSICAS
+      // ========================================
+
+      if (!orderId || orderId.trim().length === 0) {
+        throw new ApiError(
+          400,
+          "INVALID_ORDER_ID",
+          "orderId is required."
+        );
+      }
+
+      if (!idempotencyKey || idempotencyKey.trim().length === 0) {
+        throw new ApiError(
+          400,
+          "INVALID_IDEMPOTENCY_KEY",
+          "idempotencyKey is required."
+        );
+      }
+
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new ApiError(
+          400,
+          "INVALID_ITEMS",
+          "At least one item is required."
+        );
+      }
+
+      for (const item of items) {
+        if (!item.productId || item.productId.trim().length === 0) {
+          throw new ApiError(
+            400,
+            "INVALID_PRODUCT_ID",
+            "Each item must include a valid productId."
+          );
+        }
+
+        if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+          throw new ApiError(
+            400,
+            "INVALID_QUANTITY",
+            "Each item must include a quantity greater than 0."
+          );
+        }
+      }
+
+      // ========================================
+      // IDEMPOTENCIA
+      // Si ya existe una reserva para esta key,
+      // devolvemos la misma reserva.
+      // ========================================
+
+      const existingReservation =
+        repository.findReservationByIdempotencyKey(idempotencyKey);
+
+      if (existingReservation) {
+        return {
+          reservation: existingReservation,
+          isIdempotentReplay: true
+        };
+      }
+
+      // ========================================
+      // VALIDAR QUE EL orderId NO ESTÉ YA EN USO
+      // ========================================
+
+      const reservationByOrderId =
+        repository.getReservation(orderId);
+
+      if (reservationByOrderId) {
+        throw new ApiError(
+          409,
+          "ORDER_ALREADY_RESERVED",
+          "A reservation already exists for this orderId."
+        );
+      }
+
+      // ========================================
+      // VALIDACIÓN TODO-O-NADA
+      // Primero revisamos TODO el stock sin modificar nada.
+      // ========================================
+
+      for (const item of items) {
+        const inventory = repository.getInventory(item.productId);
+
+        if (!inventory) {
+          throw new ApiError(
+            404,
+            "PRODUCT_NOT_FOUND",
+            `Product ${item.productId} not found.`
+          );
+        }
+
+        if (inventory.availableStock < item.quantity) {
+          throw new ApiError(
+            422,
+            "OUT_OF_STOCK",
+            `Insufficient stock for product ${item.productId}.`
+          );
+        }
+      }
+
+      // ========================================
+      // SI TODAS LAS VALIDACIONES PASAN,
+      // RECIÉN AQUÍ APLICAMOS LA RESERVA
+      // ========================================
+
+      const now = new Date();
+
+      const expiresAt = new Date(
+        now.getTime() + ttlMinutes * 60 * 1000
+      );
+
+      for (const item of items) {
+        const inventory = repository.getInventory(item.productId)!;
+
+        inventory.availableStock -= item.quantity;
+        inventory.reservedStock += item.quantity;
+        inventory.version += 1;
+        inventory.updatedAt = new Date();
+
+        repository.saveInventory(inventory);
+      }
+
+      const reservation: Reservation = {
+        reservationId: crypto.randomUUID(),
+        orderId,
+        idempotencyKey,
+        status: "RESERVED",
+        items: items.map(item => {
+        const inventory = repository.getInventory(item.productId)!;
+
+        return {
+          productId: item.productId,
+          quantity: item.quantity,
+          availableStock: inventory.availableStock
+        };
+      }),
+        expiresAt,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      repository.saveReservation(reservation);
+      repository.saveIdempotencyKey(
+        idempotencyKey,
+        reservation.reservationId
+      );
+
+      publisher.publishReservationCreated(reservation);
+
+      return {
+        reservation,
+        isIdempotentReplay: false
+      };
+    });
+  }
+
+  async confirmReservation(
+    orderId: string
+  ): Promise<Reservation> {
+
+    return reservationMutex.runExclusive(async () => {
+
+      if (!orderId || orderId.trim().length === 0) {
+        throw new ApiError(
+          400,
+          "INVALID_ORDER_ID",
+          "orderId is required."
+        );
+      }
+
+      const reservation = repository.getReservation(orderId);
+
+      if (!reservation) {
+        throw new ApiError(
+          404,
+          "RESERVATION_NOT_FOUND",
+          "Reservation not found."
+        );
+      }
+
+      // Idempotencia: si ya está confirmada, devolver la misma
+      if (reservation.status === "CONFIRMED") {
+        return reservation;
+      }
+
+      // Solo se puede confirmar desde RESERVED
+      if (reservation.status !== "RESERVED") {
+        throw new ApiError(
+          409,
+          "RESERVATION_NOT_ACTIVE",
+          `The reservation for order ${orderId} is not in RESERVED status.`
+        );
+      }
+
+      for (const item of reservation.items) {
+        const inventory = repository.getInventory(item.productId);
+
+        if (!inventory) {
+          throw new ApiError(
+            404,
+            "PRODUCT_NOT_FOUND",
+            `Product ${item.productId} not found.`
+          );
+        }
+
+        if (inventory.reservedStock < item.quantity) {
+          throw new ApiError(
+            409,
+            "INVALID_RESERVED_STOCK",
+            `Reserved stock is inconsistent for product ${item.productId}.`
+          );
+        }
+      }
+
+      for (const item of reservation.items) {
+        const inventory = repository.getInventory(item.productId)!;
+
+        // Confirmar = sale del reservado de forma definitiva
+        inventory.reservedStock -= item.quantity;
+        inventory.version += 1;
+        inventory.updatedAt = new Date();
+
+        repository.saveInventory(inventory);
+      }
+
+      reservation.status = "CONFIRMED";
+      reservation.updatedAt = new Date();
+
+      repository.saveReservation(reservation);
+      publisher.publishReservationConfirmed(reservation);
+
+      return reservation;
+    });
+  }
+
+  async releaseReservation(
+    orderId: string
+  ): Promise<Reservation> {
+
+    return reservationMutex.runExclusive(async () => {
+
+      if (!orderId || orderId.trim().length === 0) {
+        throw new ApiError(
+          400,
+          "INVALID_ORDER_ID",
+          "orderId is required."
+        );
+      }
+
+      const reservation = repository.getReservation(orderId);
+
+      if (!reservation) {
+        throw new ApiError(
+          404,
+          "RESERVATION_NOT_FOUND",
+          "Reservation not found."
+        );
+      }
+
+      // Idempotencia: si ya está liberada, devolver la misma
+      if (reservation.status === "RELEASED") {
+        return reservation;
+      }
+
+      // Solo se puede liberar desde RESERVED
+      if (reservation.status !== "RESERVED") {
+        throw new ApiError(
+          409,
+          "RESERVATION_NOT_ACTIVE",
+          `The reservation for order ${orderId} is not in RESERVED status.`
+        );
+      }
+
+      for (const item of reservation.items) {
+        const inventory = repository.getInventory(item.productId);
+
+        if (!inventory) {
+          throw new ApiError(
+            404,
+            "PRODUCT_NOT_FOUND",
+            `Product ${item.productId} not found.`
+          );
+        }
+
+        if (inventory.reservedStock < item.quantity) {
+          throw new ApiError(
+            409,
+            "INVALID_RESERVED_STOCK",
+            `Reserved stock is inconsistent for product ${item.productId}.`
+          );
+        }
+      }
+
+      for (const item of reservation.items) {
+        const inventory = repository.getInventory(item.productId)!;
+
+        // Liberar = devolver reservado a disponible
+        inventory.reservedStock -= item.quantity;
+        inventory.availableStock += item.quantity;
+        inventory.version += 1;
+        inventory.updatedAt = new Date();
+
+        repository.saveInventory(inventory);
+      }
+
+      reservation.status = "RELEASED";
+      reservation.updatedAt = new Date();
+
+      repository.saveReservation(reservation);
+      publisher.publishReservationReleased(reservation);
+
+      return reservation;
+    });
+  }
+}
+
+export const reservationService =
+  new ReservationService();
+</file>
+
+<file path="src/events/publisher.ts">
+// ======================================================
+// Publisher - Mock Event Publisher
+// Grupo 7 - Inventory Service
+// ======================================================
+
+import crypto from "crypto";
+import { Reservation } from "../repository/repository";
+
+export interface InventoryEvent<TPayload = unknown> {
+  eventId: string;
+  eventType: string;
+  occurredAt: string;
+  payload: TPayload;
+}
+
+export class Publisher {
+
+  publish<TPayload>(
+    event: InventoryEvent<TPayload>
+  ): void {
+
+    console.log("======================================");
+    console.log(" Inventory Event Published");
+    console.log("======================================");
+    console.log(JSON.stringify(event, null, 2));
+    console.log("======================================");
+
+  }
+
+  publishReservationCreated(
+    reservation: Reservation
+  ): void {
+
+    this.publish({
+      eventId: crypto.randomUUID(),
+      eventType: "inventory.reserved",
+      occurredAt: new Date().toISOString(),
+      payload: {
+        reservationId: reservation.reservationId,
+        orderId: reservation.orderId,
+        status: reservation.status,
+        items: reservation.items,
+        expiresAt: reservation.expiresAt
+      }
+    });
+
+  }
+
+  publishReservationConfirmed(
+    reservation: Reservation
+  ): void {
+
+    this.publish({
+      eventId: crypto.randomUUID(),
+      eventType: "inventory.confirmed",
+      occurredAt: new Date().toISOString(),
+      payload: {
+        reservationId: reservation.reservationId,
+        orderId: reservation.orderId,
+        status: reservation.status,
+        items: reservation.items
+      }
+    });
+
+  }
+
+  publishReservationReleased(
+    reservation: Reservation
+  ): void {
+
+    this.publish({
+      eventId: crypto.randomUUID(),
+      eventType: "inventory.released",
+      occurredAt: new Date().toISOString(),
+      payload: {
+        reservationId: reservation.reservationId,
+        orderId: reservation.orderId,
+        status: reservation.status,
+        items: reservation.items
+      }
+    });
+
+  }
+
+}
+
+export const publisher = new Publisher();
+</file>
+
+<file path="src/index.ts">
+import express from "express";
+import cors from "cors";
+import path from "path";
+
+import swaggerUi from "swagger-ui-express";
+import YAML from "yaml";
+import fs from "fs";
+
+import inventoryRoutes from "./routes/inventory.routes";
+
+import { loadSeedData } from "./config/seed";
+import { headersMiddleware } from "./middlewares/headers.middleware";
+import { errorMiddleware } from "./middlewares/error.middleware";
+
+const app = express();
+
+const PORT = process.env.PORT || 3000;
+
+/**
+ * Middlewares
+ */
+app.use(cors());
+app.use(express.json());
+app.use(headersMiddleware);
+
+/**
+ * Datos semilla
+ */
+loadSeedData();
+
+/**
+ * Rutas
+ */
+app.use("/", inventoryRoutes);
+
+/**
+ * Swagger (/docs)
+ */
+const openApiPath = path.join(
+  __dirname,
+  "../openapi/contrato-REST-inventario.yaml"
+);
+
+const openApiFile = fs.readFileSync(openApiPath, "utf8");
+
+const swaggerDocument = YAML.parse(openApiFile);
+
+app.use(
+  "/docs",
+  swaggerUi.serve,
+  swaggerUi.setup(swaggerDocument)
+);
+
+/**
+ * Middleware global de errores
+ */
+app.use(errorMiddleware);
+
+/**
+ * Servidor
+ */
+app.listen(PORT, () => {
+
+  console.log("======================================");
+  console.log(" Inventory Service (Grupo 7)");
+  console.log("======================================");
+  console.log(` Server running on port ${PORT}`);
+  console.log(` Swagger: http://localhost:${PORT}/docs`);
+  console.log("======================================");
+
+});
+</file>
+
+<file path="src/middlewares/error.middleware.ts">
+import { Request, Response, NextFunction } from "express";
+
+/**
+ * Error personalizado del servicio.
+ */
+export class ApiError extends Error {
+
+  constructor(
+    public status: number,
+    public code: string,
+    message: string
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+
+}
+
+/**
+ * Middleware global de manejo de errores.
+ */
+export function errorMiddleware(
+  err: Error,
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+
+  if (err instanceof ApiError) {
+
+    res.status(err.status).json({
+
+      timestamp: new Date().toISOString(),
+
+      status: err.status,
+
+      code: err.code,
+
+      message: err.message,
+
+      correlationId:
+        req.headers["x-correlation-id"] ?? null
+
+    });
+
+    return;
+
+  }
+
+  console.error(err);
+
+  res.status(500).json({
+
+    timestamp: new Date().toISOString(),
+
+    status: 500,
+
+    code: "INTERNAL_SERVER_ERROR",
+
+    message: "Unexpected server error.",
+
+    correlationId:
+      req.headers["x-correlation-id"] ?? null
+
+  });
+
+}
+</file>
+
+<file path="src/middlewares/headers.middleware.ts">
+import { Request, Response, NextFunction } from "express";
+import crypto from "crypto";
+
+import { ApiError } from "./error.middleware";
+
+export function headersMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+
+  const requestId =
+    req.header("X-Request-Id") ??
+    crypto.randomUUID();
+
+  const correlationId =
+    req.header("X-Correlation-Id") ??
+    crypto.randomUUID();
+
+  const consumer =
+    req.header("X-Consumer");
+
+  if (!consumer) {
+    next(
+      new ApiError(
+        400,
+        "MISSING_HEADER",
+        "Header X-Consumer is required."
+      )
+    );
+    return;
+  }
+
+  req.headers["x-request-id"] = requestId;
+  req.headers["x-correlation-id"] = correlationId;
+  req.headers["x-consumer"] = consumer;
+
+  res.setHeader("X-Request-Id", requestId);
+  res.setHeader("X-Correlation-Id", correlationId);
+  res.setHeader("X-Consumer", consumer);
+
+  next();
+}
+</file>
+
+<file path="src/repository/repository.ts">
+// ======================================================
+// Repository - In Memory Store
+// Grupo 7 - Inventory Service
+// ======================================================
+
+export interface Inventory {
+  productId: string;
+  availableStock: number;
+  reservedStock: number;
+  version: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ReservationItem {
+  productId: string;
+  quantity: number;
+  availableStock: number;
+}
+
+export type ReservationStatus =
+  | "RESERVED"
+  | "CONFIRMED"
+  | "RELEASED"
+  | "EXPIRED";
+
+export interface Reservation {
+  reservationId: string;
+  orderId: string;
+  idempotencyKey: string;
+  status: ReservationStatus;
+  items: ReservationItem[];
+  expiresAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface InventoryView {
+  productId: string;
+  availableStock: number;
+  reservedStock: number;
+  totalStock: number;
+  virtualStock: number;
+}
+
+export interface StockIdempotencyRecord {
+  productId: string;
+  operation: "SET" | "ADD";
+  quantity: number;
+  response: InventoryView;
+}
+
+class Repository {
+
+  // ========================================
+  // STORE EN MEMORIA
+  // ========================================
+
+  private inventoryStore = new Map<string, Inventory>();
+
+  private reservationStore = new Map<string, Reservation>();
+
+  private idempotencyStore = new Map<string, string>();
+
+  private processedEvents = new Set<string>();
+
+  private stockIdempotency = new Map<string, StockIdempotencyRecord>();
+
+  // ========================================
+  // INVENTORY
+  // ========================================
+
+  createInventory(inventory: Inventory): void {
+    this.inventoryStore.set(inventory.productId, inventory);
+  }
+
+  saveInventory(inventory: Inventory): void {
+    this.inventoryStore.set(inventory.productId, inventory);
+  }
+
+  getInventory(productId: string): Inventory | undefined {
+    return this.inventoryStore.get(productId);
+  }
+
+  existsInventory(productId: string): boolean {
+    return this.inventoryStore.has(productId);
+  }
+
+  listInventory(): Inventory[] {
+    return Array.from(this.inventoryStore.values());
+  }
+
+  deleteInventory(productId: string): boolean {
+    return this.inventoryStore.delete(productId);
+  }
+
+  findStockIdempotencyKey(
+  idempotencyKey: string
+): StockIdempotencyRecord | undefined {
+  return this.stockIdempotency.get(idempotencyKey);
+}
+
+saveStockIdempotencyKey(
+  idempotencyKey: string,
+  record: StockIdempotencyRecord
+): void {
+  this.stockIdempotency.set(idempotencyKey, record);
+}
+
+  updateStock(
+  productId: string,
+  quantity: number,
+  operation: "SET" | "ADD"
+): Inventory {
+
+  const inventory = this.inventoryStore.get(productId);
+
+  if (!inventory) {
+    throw new Error("INVENTORY_NOT_FOUND");
+  }
+
+  if (operation === "SET") {
+    inventory.availableStock = quantity;
+    inventory.reservedStock = 0;
+  } else {
+    inventory.availableStock += quantity;
+  }
+
+  inventory.version += 1;
+  inventory.updatedAt = new Date();
+
+  this.inventoryStore.set(productId, inventory);
+
+  return inventory;
+}
+
+  // ========================================
+  // RESERVATIONS
+  // ========================================
+
+  saveReservation(reservation: Reservation): void {
+    this.reservationStore.set(reservation.orderId, reservation);
+  }
+
+  getReservation(orderId: string): Reservation | undefined {
+    return this.reservationStore.get(orderId);
+  }
+
+  listReservations(): Reservation[] {
+    return Array.from(this.reservationStore.values());
+  }
+
+  deleteReservation(orderId: string): boolean {
+    return this.reservationStore.delete(orderId);
+  }
+
+  findReservationByReservationId(
+  reservationId: string
+): Reservation | undefined {
+
+  return Array
+    .from(this.reservationStore.values())
+    .find(
+      reservation =>
+        reservation.reservationId === reservationId
+    );
+
+}
+
+findReservationByIdempotencyKey(
+  idempotencyKey: string
+): Reservation | undefined {
+
+  const reservationId =
+    this.idempotencyStore.get(idempotencyKey);
+
+  if (!reservationId) {
+    return undefined;
+  }
+
+  return this.findReservationByReservationId(
+    reservationId
+  );
+
+}
+  // ========================================
+  // IDEMPOTENCY
+  // ========================================
+
+  saveIdempotencyKey(key: string, reservationId: string): void {
+    this.idempotencyStore.set(key, reservationId);
+  }
+
+  getReservationIdByIdempotencyKey(
+    key: string
+  ): string | undefined {
+    return this.idempotencyStore.get(key);
+  }
+
+
+  // ========================================
+  // EVENTOS
+  // ========================================
+
+  hasProcessedEvent(eventId: string): boolean {
+    return this.processedEvents.has(eventId);
+  }
+
+  markProcessedEvent(eventId: string): void {
+    this.processedEvents.add(eventId);
+  }
+
+
+  // ========================================
+  // VISTA
+  // ========================================
+
+  toInventoryView(
+    inventory: Inventory
+  ): InventoryView {
+
+    const totalStock =
+      inventory.availableStock +
+      inventory.reservedStock;
+
+    return {
+
+      productId: inventory.productId,
+
+      availableStock: inventory.availableStock,
+
+      reservedStock: inventory.reservedStock,
+
+      totalStock,
+
+      // disponible para vender
+
+      virtualStock:
+        inventory.availableStock
+
+    };
+
+  }
+
+}
+
+export const repository = new Repository();
+</file>
+
+<file path="src/routes/inventory.routes.ts">
+import { Router } from "express";
+
+import { inventoryController } from "../controllers/inventory.controller";
+
+const router = Router();
+
+/**
+ * GET /inventory
+ */
+router.get(
+  "/inventory",
+  inventoryController.getInventory.bind(inventoryController)
+);
+
+/**
+ * GET /inventory/:productId
+ */
+router.get(
+  "/inventory/:productId",
+  inventoryController.getInventoryByProductId.bind(inventoryController)
+);
+
+/**
+ * GET /inventory/:productId/stock
+ */
+router.get(
+  "/inventory/:productId/stock",
+  inventoryController.getStock.bind(inventoryController)
+);
+
+/**
+ * POST /inventory/:productId/stock
+ */
+router.post(
+  "/inventory/:productId/stock",
+  inventoryController.setStock.bind(inventoryController)
+);
+
+/**
+ * POST /inventory/reserve
+ */
+router.post(
+  "/inventory/reserve",
+  inventoryController.reserve.bind(inventoryController)
+);
+
+/**
+ * POST /inventory/confirm
+ */
+router.post(
+  "/inventory/confirm",
+  inventoryController.confirmReservation.bind(inventoryController)
+);
+
+/**
+ * POST /inventory/release
+ */
+router.post(
+  "/inventory/release",
+  inventoryController.releaseReservation.bind(inventoryController)
+);
+
+export default router;
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    "rootDir": "./src",
+    "outDir": "./dist",
+
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+
+    "types": ["node"],
+
+    "sourceMap": true
+  },
+  "include": ["src"]
+}
+</file>
+
+</files>

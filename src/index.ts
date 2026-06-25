@@ -14,7 +14,8 @@ import { errorMiddleware } from "./middlewares/error.middleware";
 
 const app = express();
 
-const PORT = process.env.PORT || 3000;
+// CORREGIDO: Puerto mandatorio de la especificación es 3006
+const PORT = process.env.PORT || 3006;
 
 /**
  * Middlewares
@@ -42,7 +43,6 @@ const openApiPath = path.join(
 );
 
 const openApiFile = fs.readFileSync(openApiPath, "utf8");
-
 const swaggerDocument = YAML.parse(openApiFile);
 
 app.use(
@@ -60,12 +60,10 @@ app.use(errorMiddleware);
  * Servidor
  */
 app.listen(PORT, () => {
-
   console.log("======================================");
-  console.log(" Inventory Service (Grupo 7)");
+  console.log(" Inventory Service (Grupo 7) - MOCK");
   console.log("======================================");
   console.log(` Server running on port ${PORT}`);
-  console.log(` Swagger: http://localhost:${PORT}/docs`);
+  console.log(` Swagger docs: http://localhost:${PORT}/docs`);
   console.log("======================================");
-
 });
