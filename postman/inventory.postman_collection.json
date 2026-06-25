@@ -148,7 +148,12 @@
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:3000",
+      "value": "https://inventario-g7.onrender.com",
+      "type": "string"
+    },
+    {
+      "key": "baseUrlLocal",
+      "value": "http://localhost:3006",
       "type": "string"
     }
   ]
