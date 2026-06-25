@@ -3,8 +3,23 @@ info:
   title: Inventory Service API
   version: "1.0.0"
   description: |
-    Servicio REST de inventario del Grupo 7.
-    Actualmente expone endpoints de consulta de inventario en memoria.
+    Servicio de **Inventario y Concurrencia** del ecosistema Mini Marketplace Cloud
+    (Grupo 7). Es la única autoridad sobre el stock de los productos: gestiona la
+    consulta, carga/reposición, reserva, liberación y confirmación de existencias,
+    garantizando la consistencia bajo accesos concurrentes.
+
+    Resuelve de forma explícita los desafíos de concurrencia mediante **lock
+    optimista** (actualización condicional del stock: `UPDATE ... WHERE stock > 0`)
+    e **idempotencia** por `Idempotency-Key`, evitando la sobreventa cuando varios
+    pedidos compiten por las últimas unidades disponibles.
+
+    **Stack:** Node.js (Express) · Supabase Postgres · Supabase Realtime (canal `inventory.events`) · Render Free.
+
+    > El esquema OpenAPI se sirve con `swagger-ui-express` en la ruta `/docs`.
+
+    **Eventos que publica:** `StockReserved`, `StockRejected`, `StockConfirmed`, `StockReleased`, `StockChanged`.
+    **Eventos que consume:** `ProductCreated` (de G3), `OrderCreated` (de G5),
+    `PaymentApproved` y `PaymentRejected` (de G6).
 
 servers:
   - url: http://localhost:3006
@@ -12,15 +27,21 @@ servers:
 
 tags:
   - name: Inventory
-    description: Endpoints de consulta de inventario
+    description: Consulta y carga de stock
+  - name: Reservations
+    description: Reserva, confirmación y liberación de stock
 
 paths:
   /inventory:
     get:
       tags:
         - Inventory
-      summary: Listar inventario
-      description: Retorna el inventario paginado.
+      summary: Listar inventario (paginado)
+      description: >
+        Lista el stock de todos los productos, paginado. Pensado para que
+        Reportería y el Chatbot consulten el inventario por REST sin
+        pedir producto por producto.
+      operationId: listInventory
       parameters:
         - in: query
           name: page
@@ -29,7 +50,7 @@ paths:
             type: integer
             minimum: 1
             default: 1
-          description: Número de página
+          description: Número de página (1-based)
         - in: query
           name: size
           required: false
@@ -38,14 +59,31 @@ paths:
             minimum: 1
             maximum: 100
             default: 20
-          description: Tamaño de página
+          description: Cantidad de elementos por página
       responses:
         "200":
-          description: Inventario paginado
+          description: Lista paginada del inventario
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaginatedInventory"
+              example:
+                data:
+                  - productId: "550e8400-e29b-41d4-a716-446655440000"
+                    availableStock: 13
+                    reservedStock: 2
+                    totalStock: 15
+                    virtualStock: 13
+                  - productId: "660e8400-e29b-41d4-a716-446655440111"
+                    availableStock: 0
+                    reservedStock: 0
+                    totalStock: 0
+                    virtualStock: 0
+                pagination:
+                  page: 1
+                  size: 20
+                  total: 2
+                  totalPages: 1
         "400":
           description: Parámetros inválidos
           content:
@@ -57,21 +95,29 @@ paths:
     get:
       tags:
         - Inventory
-      summary: Obtener inventario por productId
+      summary: Consultar stock de un producto
+      operationId: getInventory
       parameters:
         - in: path
           name: productId
           required: true
           schema:
             type: string
-          description: Identificador del producto
+            format: uuid
+          description: UUID del producto
       responses:
         "200":
-          description: Inventario encontrado
+          description: Stock encontrado
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/InventoryView"
+              example:
+                productId: "550e8400-e29b-41d4-a716-446655440000"
+                availableStock: 1
+                reservedStock: 0
+                totalStock: 1
+                virtualStock: 1
         "404":
           description: Producto no encontrado
           content:
@@ -83,15 +129,17 @@ paths:
     get:
       tags:
         - Inventory
-      summary: Obtener stock de un producto
+      summary: Obtener stock de un producto (alias)
       description: Retorna la misma vista de inventario del producto.
+      operationId: getStock
       parameters:
         - in: path
           name: productId
           required: true
           schema:
             type: string
-          description: Identificador del producto
+            format: uuid
+          description: UUID del producto
       responses:
         "200":
           description: Stock del producto
@@ -105,6 +153,240 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags:
+        - Inventory
+      summary: Cargar o reponer stock de un producto
+      description: >
+        Operación del rol vendedor/administrador. `SET` fija el stock total a un
+        valor; `ADD` lo incrementa (reposición). Es la única vía para que el stock
+        entre al sistema. Requiere `Idempotency-Key` para que una reposición no se
+        aplique dos veces. Publica el evento `StockChanged`.
+      operationId: setStock
+      parameters:
+        - in: path
+          name: productId
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID del producto
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID que garantiza que la operación no se procese dos veces
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetStockRequest"
+            example:
+              quantity: 50
+              operation: SET
+      responses:
+        "200":
+          description: Stock actualizado. (Publica evento StockChanged)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryView"
+              example:
+                productId: "550e8400-e29b-41d4-a716-446655440000"
+                availableStock: 50
+                reservedStock: 0
+                totalStock: 50
+                virtualStock: 50
+        "400":
+          description: Parámetros inválidos
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Producto no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inventory/reserve:
+    post:
+      tags:
+        - Reservations
+      summary: Reservar stock para un pedido (lote, idempotente)
+      description: >
+        Reserva el stock de TODOS los items del pedido de forma atómica
+        (todo-o-nada): si falta stock de cualquier producto, no se reserva ninguno
+        y se responde 422. La reserva tiene una expiración (TTL, ej. 15 min); si el
+        pago no se confirma a tiempo, se libera automáticamente. La idempotencia se
+        controla con `Idempotency-Key` (una por pedido).
+        Publica `StockReserved` si tiene éxito, o `StockRejected` si falta stock.
+
+        Esta es la operación donde se resuelve el caso crítico de concurrencia:
+        ante dos reservas casi simultáneas por la última unidad, solo una tiene
+        éxito (UPDATE condicional con validación de filas afectadas).
+      operationId: reserveStock
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID que garantiza que la operación no se procese dos veces
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReserveRequest"
+            example:
+              orderId: ORD-1001
+              items:
+                - productId: "550e8400-e29b-41d4-a716-446655440000"
+                  quantity: 2
+                - productId: "660e8400-e29b-41d4-a716-446655440111"
+                  quantity: 1
+      responses:
+        "201":
+          description: Reserva creada para el pedido. (Publica evento StockReserved)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reservation"
+              example:
+                reservationId: RES-2001
+                orderId: ORD-1001
+                status: RESERVED
+                items:
+                  - productId: "550e8400-e29b-41d4-a716-446655440000"
+                    quantity: 2
+                    availableStock: 13
+                  - productId: "660e8400-e29b-41d4-a716-446655440111"
+                    quantity: 1
+                    availableStock: 0
+                expiresAt: "2026-06-17T15:05:00Z"
+        "200":
+          description: >
+            Idempotencia: el `Idempotency-Key` ya fue procesado con éxito.
+            Se devuelve la reserva original sin crear una nueva.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reservation"
+        "400":
+          description: Petición inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Producto no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflicto de estado o idempotencia
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: >
+            Stock insuficiente para uno o más items (no se reservó nada).
+            (Publica evento StockRejected)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                timestamp: "2026-06-17T14:32:10Z"
+                status: 422
+                code: OUT_OF_STOCK
+                message: "Sin stock suficiente para el producto 660e8400-e29b-41d4-a716-446655440111"
+                correlationId: "abc-124"
+
+  /inventory/confirm:
+    post:
+      tags:
+        - Reservations
+      summary: Confirmar la reserva de un pedido (descuento definitivo)
+      description: >
+        Convierte la reserva en descuento definitivo (el stock reservado sale del
+        total). Se llama típicamente al recibir `PaymentApproved`. Idempotente:
+        confirmar dos veces el mismo pedido devuelve 200 sin doble descuento.
+        Publica `StockConfirmed`.
+      operationId: confirmReservation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderRef"
+            example:
+              orderId: ORD-1001
+      responses:
+        "200":
+          description: Reserva confirmada. (Publica evento StockConfirmed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reservation"
+        "404":
+          description: Reserva/producto no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: La reserva no está en estado RESERVED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /inventory/release:
+    post:
+      tags:
+        - Reservations
+      summary: Liberar la reserva de un pedido
+      description: >
+        Devuelve el stock reservado al disponible. Se llama al recibir
+        `PaymentRejected`, al cancelar el pedido, o automáticamente cuando la
+        reserva expira (TTL). Idempotente. Publica `StockReleased`.
+      operationId: releaseReservation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderRef"
+            example:
+              orderId: ORD-1001
+      responses:
+        "200":
+          description: Reserva liberada. (Publica evento StockReleased)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reservation"
+        "404":
+          description: Reserva/producto no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: La reserva no está en estado RESERVED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
 components:
   schemas:
@@ -113,18 +395,30 @@ components:
       properties:
         productId:
           type: string
+          format: uuid
           example: "550e8400-e29b-41d4-a716-446655440000"
         availableStock:
           type: integer
+          minimum: 0
+          description: Unidades libres para reservar. Coincide con virtualStock.
           example: 15
         reservedStock:
           type: integer
+          minimum: 0
+          description: Unidades apartadas por reservas activas (esperando confirmación de pago).
           example: 0
         totalStock:
           type: integer
+          minimum: 0
+          description: Stock físico en bodega = availableStock + reservedStock.
           example: 15
         virtualStock:
           type: integer
+          minimum: 0
+          description: >
+            Stock virtual vendible = totalStock - reservedStock. Es el stock
+            realmente disponible para vender (descuenta lo reservado que aún
+            espera confirmación de pago).
           example: 15
 
     Pagination:
@@ -138,6 +432,7 @@ components:
           example: 20
         total:
           type: integer
+          description: Total de productos en inventario.
           example: 2
         totalPages:
           type: integer
@@ -153,11 +448,89 @@ components:
         pagination:
           $ref: "#/components/schemas/Pagination"
 
+    SetStockRequest:
+      type: object
+      required: [quantity, operation]
+      properties:
+        quantity:
+          type: integer
+          minimum: 0
+          example: 50
+        operation:
+          type: string
+          enum: [SET, ADD]
+          description: SET fija el total; ADD repone (incrementa).
+
+    ReserveItem:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+
+    ReserveRequest:
+      type: object
+      required: [orderId, items]
+      properties:
+        orderId:
+          type: string
+          description: Pedido al que pertenece la reserva.
+          example: ORD-1001
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ReserveItem"
+
+    OrderRef:
+      type: object
+      required: [orderId]
+      properties:
+        orderId:
+          type: string
+          example: ORD-1001
+
+    ReservationItem:
+      type: object
+      properties:
+        productId:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+        availableStock:
+          type: integer
+          description: Stock disponible restante tras la operación.
+
+    Reservation:
+      type: object
+      properties:
+        reservationId:
+          type: string
+        orderId:
+          type: string
+        status:
+          type: string
+          enum: [RESERVED, CONFIRMED, RELEASED, EXPIRED]
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReservationItem"
+        expiresAt:
+          type: string
+          format: date-time
+          description: Momento en que la reserva expira si no se confirma (TTL).
+
     ErrorResponse:
       type: object
       properties:
         timestamp:
           type: string
+          format: date-time
           example: "2026-06-24T20:00:00.000Z"
         status:
           type: integer
