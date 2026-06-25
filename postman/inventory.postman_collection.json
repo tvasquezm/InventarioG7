@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "a7c7bd7d-74d7-4bc3-bf9c-2b5d4481b7a7",
     "name": "E2 - Inventory Service Mock (Grupo 7)",
-    "description": "Colección de pruebas automáticas para la Fase 2 del Servicio de Inventario. Incluye validaciones de headers, flujo idempotente, y el caso crítico de Concurrencia (Race Condition) por la última unidad disponible. Cada request tiene tests (pm.test) que afirman el resultado esperado: correr la colección completa y en orden con 'Run collection'.",
+    "description": "Colección de pruebas automáticas para la Fase 2 del Servicio de Inventario. Valida headers obligatorios, el flujo de reserva/rechazo/confirmación y la idempotencia. Cada request tiene tests (pm.test) que afirman el resultado esperado: correr la colección completa y en orden con 'Run collection'. NOTA: la concurrencia real (Race Condition por la última unidad) NO se prueba aquí porque Postman ejecuta los requests en secuencia; para eso usar el script 'scripts/concurrency-test.mjs', que dispara reservas en paralelo.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -142,7 +142,7 @@
       }
     },
     {
-      "name": "5. Concurrencia - Pedido A Reserva Última Unidad (Éxito)",
+      "name": "5. Reservar Stock - Última Unidad (Éxito 201)",
       "event": [
         {
           "listen": "test",
@@ -181,7 +181,7 @@
       }
     },
     {
-      "name": "6. Concurrencia - Pedido B Compite Simultáneo (Rechazo 422)",
+      "name": "6. Reservar Stock - Sin Disponibilidad (Rechazo 422)",
       "event": [
         {
           "listen": "test",
