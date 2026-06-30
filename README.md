@@ -36,7 +36,7 @@ Migramos la persistencia en memoria a **Supabase Postgres** (SQL relacional), ma
 1. **Servidor y Routing:** `Node.js` + `Express` + `TypeScript`.
 2. **Capa de Dominio:** Patrón de servicios (`reservations.ts`) con las reglas de negocio, validaciones "Todo-o-Nada" y control de estados (RESERVED -> CONFIRMED/RELEASED), ejecutadas dentro de una transacción.
 3. **Control de Concurrencia:** **Transacción Postgres** (`withTransaction` en `config/database.ts`) con `UPDATE ... WHERE available_stock >= qty` y verificación de filas afectadas. Evita el "Double Spending" incluso con múltiples instancias del servicio.
-4. **Persistencia (Repositorio):** **Supabase Postgres** vía `pg` (`repository/repository.ts`). Las 5 tablas se crean con `db/schema.sql`.
+4. **Persistencia (Repositorio):** **Supabase Postgres** vía `pg` (`repository/repository.ts`), schema `inventario`. Las 5 tablas se crean con `db/schema.sql`.
 5. **Middlewares Core:** * `headers.middleware.ts`: validación y auto-generación de trazabilidad.
    * `error.middleware.ts`: estandarización de respuestas de error (códigos HTTP, `ApiError` custom).
 
@@ -57,19 +57,18 @@ Migramos la persistencia en memoria a **Supabase Postgres** (SQL relacional), ma
    npm install
    ```
 
-3. **Crear la base de datos (Supabase):**
-   - Crea un proyecto en [supabase.com](https://supabase.com).
-   - En **SQL Editor → New snippet**, pega y ejecuta todo `db/schema.sql` (crea las 5 tablas + datos semilla; es idempotente).
-   - Copia el connection string en **Project Settings → Database → Connection string (URI)**.
+3. **Base de datos (Supabase compartido del curso):**
+   - El servicio usa el **Supabase compartido del equipo** (schema `inventario`). **No crees un proyecto propio**: pide al equipo el **connection string** del proyecto compartido.
+   - Las 5 tablas y el seed **ya están creados** en ese proyecto. Solo hay que (re)ejecutar `db/schema.sql` si se levanta una BD nueva desde cero (es idempotente: no pisa datos existentes).
 
-4. **Crear el archivo `.env`** a partir del ejemplo y poner el connection string:
+4. **Crear el archivo `.env`** a partir del ejemplo y pegar el connection string del compartido:
    ```bash
    cp .env.example .env
    ```
-   - `DATABASE_URL`: el URI de Supabase (reemplaza la contraseña; si tiene espacios u otros caracteres, codifícalos en URL, p. ej. espacio → `%20`).
+   - `DATABASE_URL`: el URI del Supabase compartido (usa el directo, puerto **5432**; reemplaza la contraseña; si tiene caracteres especiales, codifícalos en URL, p. ej. espacio → `%20`).
    - `DB_SCHEMA`: `inventario` (schema de G7 en el Supabase compartido).
    - El servicio usa el puerto **3006** (estándar del curso).
-   - ⚠️ El `.env` está en `.gitignore`: **nunca se sube la contraseña**.
+   - ⚠️ El `.env` está en `.gitignore`: la contraseña del compartido **nunca se sube** al repo.
 
 5. **Levantar en modo desarrollo** (recarga en caliente con `tsx`):
    ```bash
@@ -83,15 +82,6 @@ Migramos la persistencia en memoria a **Supabase Postgres** (SQL relacional), ma
    ```
 
 El servicio queda disponible en `http://localhost:3006` y la documentación interactiva (Swagger) en `http://localhost:3006/docs`.
-
----
-
-## 🐳 Ejecutar con Docker
-
-```bash
-docker build -t inventario-g7 .
-docker run -p 3006:3006 inventario-g7
-```
 
 ---
 
@@ -141,9 +131,11 @@ La definición completa está en `openapi/contrato-REST-inventario.yaml` y se si
 
 ## 🧪 Pruebas (Postman)
 
-La colección está en `postman/inventory.postman_collection.json`. Incluye los 7 endpoints y el **caso crítico de concurrencia**: dos pedidos compiten por la última unidad → uno reserva con éxito (`201`) y el otro es rechazado (`422`), dejando el stock final en 0.
+La colección está en `postman/inventory.postman_collection.json`. Incluye 7 requests que cubren los flujos principales de forma **secuencial**: listar inventario, error por header faltante, consultar stock, reabastecer, reservar la última unidad (`201`), rechazo por falta de stock (`422`) y confirmar la reserva.
 
-Importar en Postman → ajustar la variable de entorno con la URL (local `http://localhost:3006` o la URL pública del mock).
+> La colección **no** prueba concurrencia real (sus requests corren en secuencia). El caso de dos pedidos compitiendo **simultáneamente** por la última unidad se valida con el script `scripts/concurrency-test.mjs` (ver abajo).
+
+Importar en Postman → ajustar la variable de entorno con la URL (local `http://localhost:3006` o la URL pública del servicio).
 
 ### Datos semilla (en `db/schema.sql`)
 | productId | availableStock |
@@ -176,9 +168,9 @@ Desplegado en **Render** (plan Free) con persistencia en **Supabase Postgres**.
 - **URL pública:** https://inventario-g7.onrender.com
 - **Documentación (Swagger):** https://inventario-g7.onrender.com/docs
 - **Health check:** https://inventario-g7.onrender.com/health
-- **Build:** `npm install && npm run build` · **Start:** `npm start` (o usando el `Dockerfile`).
+- **Build:** `npm install && npm run build` · **Start:** `npm start`.
 - Render inyecta su propia variable `PORT`; el servicio la respeta automáticamente.
-- **Variable de entorno requerida en Render:** `DATABASE_URL` (el connection string de Supabase). Se configura en el dashboard de Render (Environment), **no** en el repo.
+- **Variable de entorno requerida en Render:** `DATABASE_URL` (el connection string del Supabase **compartido**). Se configura en el dashboard de Render (Environment), **no** en el repo. `DB_SCHEMA=inventario` ya viene declarada en `render.yaml`.
 - ⚠️ En el plan Free el servicio se duerme tras inactividad: el primer request tras un rato puede tardar ~30–60s (cold start). El estado **ya no se pierde** en el cold start: vive en Postgres.
 
 ---
