@@ -1,3 +1,5 @@
+import "dotenv/config";
+
 import express from "express";
 import cors from "cors";
 import path from "path";
@@ -8,7 +10,7 @@ import fs from "fs";
 
 import inventoryRoutes from "./routes/inventory.routes";
 
-import { loadSeedData } from "./config/seed";
+import { pingDatabase } from "./config/database";
 import { headersMiddleware } from "./middlewares/headers.middleware";
 import { errorMiddleware } from "./middlewares/error.middleware";
 
@@ -52,11 +54,6 @@ app.use(
 app.use(headersMiddleware);
 
 /**
- * Datos semilla
- */
-loadSeedData();
-
-/**
  * Rutas de negocio
  */
 app.use("/", inventoryRoutes);
@@ -67,13 +64,24 @@ app.use("/", inventoryRoutes);
 app.use(errorMiddleware);
 
 /**
- * Servidor
+ * Servidor: primero verifica la conexion a Postgres (Supabase),
+ * luego levanta el HTTP.
  */
-app.listen(PORT, () => {
-  console.log("======================================");
-  console.log(" Inventory Service (Grupo 7) - MOCK");
-  console.log("======================================");
-  console.log(` Server running on port ${PORT}`);
-  console.log(` Swagger docs: http://localhost:${PORT}/docs`);
-  console.log("======================================");
+async function start() {
+  await pingDatabase();
+  console.log("✓ Conexion a Postgres (Supabase) OK");
+
+  app.listen(PORT, () => {
+    console.log("======================================");
+    console.log(" Inventory Service (Grupo 7)");
+    console.log("======================================");
+    console.log(` Server running on port ${PORT}`);
+    console.log(` Swagger docs: http://localhost:${PORT}/docs`);
+    console.log("======================================");
+  });
+}
+
+start().catch((err) => {
+  console.error("No se pudo iniciar el servicio:", err);
+  process.exit(1);
 });

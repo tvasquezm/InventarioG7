@@ -1,33 +1,27 @@
 import { Request, Response, NextFunction } from "express";
 import { reservationService } from "../domain/reservations";
 import { repository } from "../repository/repository";
+import { withTransaction } from "../config/database";
 import { ApiError } from "../middlewares/error.middleware";
-import { publisher } from "../events/publisher"; // <-- AÑADIDO: Para emitir StockChanged
+import { publisher } from "../events/publisher";
 
 export class InventoryController {
 
   /**
    * GET /inventory
    */
-  getInventory(
+  async getInventory(
     req: Request,
     res: Response,
     next: NextFunction
-  ): void {
+  ): Promise<void> {
 
     try {
 
-      const page =
-        Number(req.query.page ?? 1);
+      const page = Number(req.query.page ?? 1);
+      const size = Number(req.query.size ?? 20);
 
-      const size =
-        Number(req.query.size ?? 20);
-
-      if (
-        page < 1 ||
-        size < 1 ||
-        size > 100
-      ) {
+      if (page < 1 || size < 1 || size > 100) {
         throw new ApiError(
           400,
           "INVALID_REQUEST",
@@ -35,28 +29,19 @@ export class InventoryController {
         );
       }
 
-      const inventory =
-        repository.listInventory();
+      const total = await repository.countInventory();
+      const offset = (page - 1) * size;
 
-      const start =
-        (page - 1) * size;
-
-      const data =
-        inventory
-          .slice(start, start + size)
-          .map(item =>
-            repository.toInventoryView(item)
-          );
+      const rows = await repository.listInventoryPage(size, offset);
+      const data = rows.map(item => repository.toInventoryView(item));
 
       res.status(200).json({
         data,
         pagination: {
           page,
           size,
-          total: inventory.length,
-          totalPages: Math.ceil(
-            inventory.length / size
-          )
+          total,
+          totalPages: Math.ceil(total / size)
         }
       });
 
@@ -70,20 +55,17 @@ export class InventoryController {
   /**
    * GET /inventory/:productId
    */
-  getInventoryByProductId(
+  async getInventoryByProductId(
     req: Request,
     res: Response,
     next: NextFunction
-  ): void {
+  ): Promise<void> {
 
     try {
 
       const rawProductId = req.params.productId;
 
-      if (
-        !rawProductId ||
-        Array.isArray(rawProductId)
-      ) {
+      if (!rawProductId || Array.isArray(rawProductId)) {
         throw new ApiError(
           400,
           "INVALID_PRODUCT_ID",
@@ -91,8 +73,7 @@ export class InventoryController {
         );
       }
 
-      const inventory =
-        repository.getInventory(rawProductId);
+      const inventory = await repository.getInventory(rawProductId);
 
       if (!inventory) {
         throw new ApiError(
@@ -102,9 +83,7 @@ export class InventoryController {
         );
       }
 
-      res.status(200).json(
-        repository.toInventoryView(inventory)
-      );
+      res.status(200).json(repository.toInventoryView(inventory));
 
     }
     catch (error) {
@@ -116,42 +95,31 @@ export class InventoryController {
   /**
    * GET /inventory/:productId/stock
    */
-  getStock(
+  async getStock(
     req: Request,
     res: Response,
     next: NextFunction
-  ): void {
+  ): Promise<void> {
 
-    this.getInventoryByProductId(
-      req,
-      res,
-      next
-    );
+    await this.getInventoryByProductId(req, res, next);
 
   }
 
   /**
    * POST /inventory/:productId/stock
    */
-  setStock(
+  async setStock(
     req: Request,
     res: Response,
     next: NextFunction
-  ): void {
+  ): Promise<void> {
 
     try {
 
-      const idempotencyKey =
-        req.header("Idempotency-Key");
+      const idempotencyKey = req.header("Idempotency-Key");
+      const correlationId = req.headers["x-correlation-id"] as string;
 
-      // <-- AÑADIDO: Extraer trazabilidad
-      const correlationId = 
-        req.headers["x-correlation-id"] as string;
-
-      if (
-        !idempotencyKey ||
-        idempotencyKey.trim().length === 0
-      ) {
+      if (!idempotencyKey || idempotencyKey.trim().length === 0) {
         throw new ApiError(
           400,
           "MISSING_IDEMPOTENCY_KEY",
@@ -161,10 +129,7 @@ export class InventoryController {
 
       const rawProductId = req.params.productId;
 
-      if (
-        !rawProductId ||
-        Array.isArray(rawProductId)
-      ) {
+      if (!rawProductId || Array.isArray(rawProductId)) {
         throw new ApiError(
           400,
           "INVALID_PRODUCT_ID",
@@ -174,10 +139,7 @@ export class InventoryController {
 
       const { quantity, operation } = req.body;
 
-      if (
-        typeof quantity !== "number" ||
-        quantity < 0
-      ) {
+      if (typeof quantity !== "number" || quantity < 0) {
         throw new ApiError(
           400,
           "INVALID_REQUEST",
@@ -185,10 +147,7 @@ export class InventoryController {
         );
       }
 
-      if (
-        operation !== "SET" &&
-        operation !== "ADD"
-      ) {
+      if (operation !== "SET" && operation !== "ADD") {
         throw new ApiError(
           400,
           "INVALID_REQUEST",
@@ -197,77 +156,71 @@ export class InventoryController {
       }
 
       // ========================================
-      // IDEMPOTENCIA REAL
-      // Si esta key ya fue usada, devolvemos
-      // la misma respuesta sin volver a tocar stock.
+      // IDEMPOTENCIA REAL (en transaccion)
+      // Reclamamos la clave con un INSERT; si ya existia,
+      // es un replay y no volvemos a tocar el stock.
       // ========================================
-      
-      const existingRecord =
-        repository.findStockIdempotencyKey(idempotencyKey);
 
-      if (existingRecord) {
-        const sameRequest =
-          existingRecord.productId === rawProductId &&
-          existingRecord.quantity === quantity &&
-          existingRecord.operation === operation;
+      const result = await withTransaction(async (client) => {
 
-        if (!sameRequest) {
-          throw new ApiError(
-            409,
-            "IDEMPOTENCY_KEY_REUSED",
-            "Idempotency-Key was already used with a different stock operation."
-          );
+        const inventory = await repository.getInventory(rawProductId, client);
+
+        if (!inventory) {
+          throw new ApiError(404, "PRODUCT_NOT_FOUND", "Product not found.");
         }
 
-        res.status(200).json(existingRecord.response);
-        return;
-      }
-
-      const inventory =
-        repository.getInventory(rawProductId);
-
-      if (!inventory) {
-        throw new ApiError(
-          404,
-          "PRODUCT_NOT_FOUND",
-          "Product not found."
+        const claimed = await repository.saveStockOperation(
+          idempotencyKey,
+          { productId: rawProductId, operation, quantity },
+          client
         );
-      }
 
-      const updatedInventory =
-        repository.updateStock(
+        if (!claimed) {
+          // Replay: validar que sea la misma operacion y devolver estado actual.
+          const existing = await repository.findStockOperation(idempotencyKey, client);
+
+          if (
+            existing &&
+            !(existing.productId === rawProductId &&
+              existing.quantity === quantity &&
+              existing.operation === operation)
+          ) {
+            throw new ApiError(
+              409,
+              "IDEMPOTENCY_KEY_REUSED",
+              "Idempotency-Key was already used with a different stock operation."
+            );
+          }
+
+          const current = await repository.getInventory(rawProductId, client);
+          return {
+            view: repository.toInventoryView(current!),
+            replay: true
+          };
+        }
+
+        const updated = await repository.updateStock(
           rawProductId,
           quantity,
-          operation
+          operation,
+          client
         );
 
-      const response =
-        repository.toInventoryView(updatedInventory);
+        return {
+          view: repository.toInventoryView(updated),
+          replay: false
+        };
+      });
 
-      repository.saveStockIdempotencyKey(
-        idempotencyKey,
-        {
-          productId: rawProductId,
-          operation,
-          quantity,
-          response
-        }
-      );
+      if (!result.replay) {
+        publisher.publishStockChanged(rawProductId, result.view, correlationId);
+      }
 
-      // <-- AÑADIDO: Publicar el evento obligatorio del ecosistema (Fase 2)
-      publisher.publishStockChanged(
-        rawProductId,
-        response,
-        correlationId
-      );
-
-      res.status(200).json(response);
+      res.status(200).json(result.view);
 
     }
     catch (error) {
-
       next(error);
-
     }
 
   }
@@ -283,17 +236,10 @@ export class InventoryController {
 
     try {
 
-      const idempotencyKey =
-        req.header("Idempotency-Key");
+      const idempotencyKey = req.header("Idempotency-Key");
+      const correlationId = req.headers["x-correlation-id"] as string;
 
-      // <-- AÑADIDO: Extraer trazabilidad
-      const correlationId = 
-        req.headers["x-correlation-id"] as string;
-
-      if (
-        !idempotencyKey ||
-        idempotencyKey.trim().length === 0
-      ) {
+      if (!idempotencyKey || idempotencyKey.trim().length === 0) {
         throw new ApiError(
           400,
           "MISSING_IDEMPOTENCY_KEY",
@@ -301,25 +247,18 @@ export class InventoryController {
         );
       }
 
-      const {
+      const { orderId, items } = req.body;
+
+      const result = await reservationService.reserveStock({
         orderId,
-        items
-      } = req.body;
+        idempotencyKey,
+        items,
+        correlationId
+      });
 
-      const result =
-        await reservationService.reserveStock({
-          orderId,
-          idempotencyKey,
-          items,
-          correlationId // <-- AÑADIDO: Pasar al dominio
-        });
+      const statusCode = result.isIdempotentReplay ? 200 : 201;
 
-      const statusCode =
-        result.isIdempotentReplay ? 200 : 201;
-
-      res
-        .status(statusCode)
-        .json(result.reservation);
+      res.status(statusCode).json(result.reservation);
 
     }
     catch (error) {
@@ -340,28 +279,16 @@ export class InventoryController {
     try {
 
       const { orderId } = req.body;
+      const correlationId = req.headers["x-correlation-id"] as string;
 
-      // <-- AÑADIDO: Extraer trazabilidad
-      const correlationId = 
-        req.headers["x-correlation-id"] as string;
-
-      if (
-        !orderId ||
-        typeof orderId !== "string" ||
-        orderId.trim().length === 0
-      ) {
-        throw new ApiError(
-          400,
-          "INVALID_ORDER_ID",
-          "orderId is required."
-        );
+      if (!orderId || typeof orderId !== "string" || orderId.trim().length === 0) {
+        throw new ApiError(400, "INVALID_ORDER_ID", "orderId is required.");
       }
 
-      const reservation =
-        await reservationService.confirmReservation(
-          orderId,
-          correlationId // <-- AÑADIDO: Pasar al dominio
-        );
+      const reservation = await reservationService.confirmReservation(
+        orderId,
+        correlationId
+      );
 
       res.status(200).json(reservation);
 
@@ -384,28 +311,16 @@ export class InventoryController {
     try {
 
       const { orderId } = req.body;
+      const correlationId = req.headers["x-correlation-id"] as string;
 
-      // <-- AÑADIDO: Extraer trazabilidad
-      const correlationId = 
-        req.headers["x-correlation-id"] as string;
-
-      if (
-        !orderId ||
-        typeof orderId !== "string" ||
-        orderId.trim().length === 0
-      ) {
-        throw new ApiError(
-          400,
-          "INVALID_ORDER_ID",
-          "orderId is required."
-        );
+      if (!orderId || typeof orderId !== "string" || orderId.trim().length === 0) {
+        throw new ApiError(400, "INVALID_ORDER_ID", "orderId is required.");
       }
 
-      const reservation =
-        await reservationService.releaseReservation(
-          orderId,
-          correlationId // <-- AÑADIDO: Pasar al dominio
-        );
+      const reservation = await reservationService.releaseReservation(
+        orderId,
+        correlationId
+      );
 
       res.status(200).json(reservation);
 
@@ -417,5 +332,4 @@ export class InventoryController {
   }
 }
 
-export const inventoryController =
-  new InventoryController();
+export const inventoryController = new InventoryController();

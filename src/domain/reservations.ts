@@ -1,6 +1,6 @@
 import crypto from "crypto";
-import { Mutex } from "async-mutex";
 import { publisher } from "../events/publisher";
+import { withTransaction } from "../config/database";
 
 import {
   repository,
@@ -19,19 +19,13 @@ export interface ReserveStockRequest {
   idempotencyKey: string;
   items: ReservationItem[];
   ttlMinutes?: number;
-  correlationId: string; // <-- AÑADIDO: Requerido por el estándar Fase 2
+  correlationId: string;
 }
 
 export interface ReserveStockResult {
   reservation: Reservation;
   isIdempotentReplay: boolean;
 }
-
-// ========================================
-// MUTEX GLOBAL DEL DOMINIO
-// ========================================
-
-const reservationMutex = new Mutex();
 
 // ========================================
 // CONFIG
@@ -49,72 +43,51 @@ export class ReservationService {
     request: ReserveStockRequest
   ): Promise<ReserveStockResult> {
 
-    return reservationMutex.runExclusive(async () => {
+    const {
+      orderId,
+      idempotencyKey,
+      items,
+      ttlMinutes = DEFAULT_RESERVATION_TTL_MINUTES,
+      correlationId
+    } = request;
 
-      const {
-        orderId,
-        idempotencyKey,
-        items,
-        ttlMinutes = DEFAULT_RESERVATION_TTL_MINUTES,
-        correlationId // <-- AÑADIDO
-      } = request;
+    // ========================================
+    // VALIDACIONES BASICAS (sin BD)
+    // ========================================
 
-      // ========================================
-      // VALIDACIONES BÁSICAS
-      // ========================================
+    if (!orderId || orderId.trim().length === 0) {
+      throw new ApiError(400, "INVALID_ORDER_ID", "orderId is required.");
+    }
 
-      if (!orderId || orderId.trim().length === 0) {
-        throw new ApiError(
-          400,
-          "INVALID_ORDER_ID",
-          "orderId is required."
-        );
+    if (!idempotencyKey || idempotencyKey.trim().length === 0) {
+      throw new ApiError(400, "INVALID_IDEMPOTENCY_KEY", "idempotencyKey is required.");
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      throw new ApiError(400, "INVALID_ITEMS", "At least one item is required.");
+    }
+
+    for (const item of items) {
+      if (!item.productId || item.productId.trim().length === 0) {
+        throw new ApiError(400, "INVALID_PRODUCT_ID", "Each item must include a valid productId.");
       }
-
-      if (!idempotencyKey || idempotencyKey.trim().length === 0) {
-        throw new ApiError(
-          400,
-          "INVALID_IDEMPOTENCY_KEY",
-          "idempotencyKey is required."
-        );
+      if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+        throw new ApiError(400, "INVALID_QUANTITY", "Each item must include a quantity greater than 0.");
       }
+    }
 
-      if (!Array.isArray(items) || items.length === 0) {
-        throw new ApiError(
-          400,
-          "INVALID_ITEMS",
-          "At least one item is required."
-        );
-      }
+    // ========================================
+    // TRANSACCION: todo-o-nada con control de
+    // concurrencia real (UPDATE condicional + locks de fila).
+    // ========================================
 
-      for (const item of items) {
-        if (!item.productId || item.productId.trim().length === 0) {
-          throw new ApiError(
-            400,
-            "INVALID_PRODUCT_ID",
-            "Each item must include a valid productId."
-          );
-        }
+    return withTransaction(async (client) => {
 
-        if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
-          throw new ApiError(
-            400,
-            "INVALID_QUANTITY",
-            "Each item must include a quantity greater than 0."
-          );
-        }
-      }
-
-      // ========================================
-      // IDEMPOTENCIA
-      // ========================================
-
+      // --- Idempotencia ---
       const existingReservation =
-        repository.findReservationByIdempotencyKey(idempotencyKey);
+        await repository.findReservationByIdempotencyKey(idempotencyKey, client);
 
       if (existingReservation) {
-
-        // <-- AÑADIDO: Defensa contra secuestro de idempotencia (Fase 2)
         if (existingReservation.orderId !== orderId) {
           throw new ApiError(
             409,
@@ -122,19 +95,12 @@ export class ReservationService {
             "Idempotency-Key already used for a different order."
           );
         }
-
-        return {
-          reservation: existingReservation,
-          isIdempotentReplay: true
-        };
+        return { reservation: existingReservation, isIdempotentReplay: true };
       }
 
-      // ========================================
-      // VALIDAR QUE EL orderId NO ESTÉ YA EN USO
-      // ========================================
-
+      // --- El orderId no debe estar ya reservado ---
       const reservationByOrderId =
-        repository.getReservation(orderId);
+        await repository.getReservation(orderId, client);
 
       if (reservationByOrderId) {
         throw new ApiError(
@@ -144,14 +110,14 @@ export class ReservationService {
         );
       }
 
-      // ========================================
-      // VALIDACIÓN TODO-O-NADA
-      // ========================================
+      // --- Descuento atomico por item ---
+      const reservedItems: ReservationItem[] = [];
 
       for (const item of items) {
-        const inventory = repository.getInventory(item.productId);
 
-        if (!inventory) {
+        // Existencia del producto (para distinguir 404 de 422).
+        const exists = await repository.existsInventory(item.productId, client);
+        if (!exists) {
           throw new ApiError(
             404,
             "PRODUCT_NOT_FOUND",
@@ -159,114 +125,76 @@ export class ReservationService {
           );
         }
 
-        if (inventory.availableStock < item.quantity) {
-          
-          // <-- AÑADIDO: Avisar al ecosistema del rechazo (Fase 2)
-          publisher.publishStockRejected(
-            correlationId, 
-            { 
-              orderId, 
-              reason: `Insufficient stock for product ${item.productId}.`,
-              items 
-            }
-          );
+        // UPDATE ... WHERE available_stock >= qty.
+        // Si devuelve null, no habia stock (otra transaccion gano).
+        const remaining =
+          await repository.reserveDecrement(item.productId, item.quantity, client);
 
+        if (remaining === null) {
+          publisher.publishStockRejected(correlationId, {
+            orderId,
+            reason: `Insufficient stock for product ${item.productId}.`,
+            items
+          });
           throw new ApiError(
             422,
             "OUT_OF_STOCK",
             `Insufficient stock for product ${item.productId}.`
           );
         }
+
+        reservedItems.push({
+          productId: item.productId,
+          quantity: item.quantity,
+          availableStock: remaining
+        });
       }
 
-      // ========================================
-      // SI TODAS LAS VALIDACIONES PASAN,
-      // RECIÉN AQUÍ APLICAMOS LA RESERVA
-      // ========================================
-
+      // --- Crear la reserva ---
       const now = new Date();
-
-      const expiresAt = new Date(
-        now.getTime() + ttlMinutes * 60 * 1000
-      );
-
-      for (const item of items) {
-        const inventory = repository.getInventory(item.productId)!;
-
-        inventory.availableStock -= item.quantity;
-        inventory.reservedStock += item.quantity;
-        inventory.version += 1;
-        inventory.updatedAt = new Date();
-
-        repository.saveInventory(inventory);
-      }
+      const expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
 
       const reservation: Reservation = {
         reservationId: crypto.randomUUID(),
         orderId,
         idempotencyKey,
         status: "RESERVED",
-        items: items.map(item => {
-        const inventory = repository.getInventory(item.productId)!;
-
-        return {
-          productId: item.productId,
-          quantity: item.quantity,
-          availableStock: inventory.availableStock
-        };
-      }),
+        items: reservedItems,
         expiresAt,
         createdAt: now,
         updatedAt: now
       };
 
-      repository.saveReservation(reservation);
-      repository.saveIdempotencyKey(
-        idempotencyKey,
-        reservation.reservationId
-      );
+      await repository.insertReservation(reservation, client);
 
-      // <-- MODIFICADO: Inyectar correlationId para auditoría
       publisher.publishReservationCreated(correlationId, reservation);
 
-      return {
-        reservation,
-        isIdempotentReplay: false
-      };
+      return { reservation, isIdempotentReplay: false };
     });
   }
 
   async confirmReservation(
     orderId: string,
-    correlationId: string // <-- AÑADIDO
+    correlationId: string
   ): Promise<Reservation> {
 
-    return reservationMutex.runExclusive(async () => {
+    if (!orderId || orderId.trim().length === 0) {
+      throw new ApiError(400, "INVALID_ORDER_ID", "orderId is required.");
+    }
 
-      if (!orderId || orderId.trim().length === 0) {
-        throw new ApiError(
-          400,
-          "INVALID_ORDER_ID",
-          "orderId is required."
-        );
-      }
+    return withTransaction(async (client) => {
 
-      const reservation = repository.getReservation(orderId);
+      const reservation = await repository.getReservation(orderId, client);
 
       if (!reservation) {
-        throw new ApiError(
-          404,
-          "RESERVATION_NOT_FOUND",
-          "Reservation not found."
-        );
+        throw new ApiError(404, "RESERVATION_NOT_FOUND", "Reservation not found.");
       }
 
-      // Idempotencia: si ya está confirmada, devolver la misma
+      // Idempotencia: ya confirmada -> devolver la misma.
       if (reservation.status === "CONFIRMED") {
         return reservation;
       }
 
-      // Solo se puede confirmar desde RESERVED
       if (reservation.status !== "RESERVED") {
         throw new ApiError(
           409,
@@ -276,9 +204,8 @@ export class ReservationService {
       }
 
       for (const item of reservation.items) {
-        const inventory = repository.getInventory(item.productId);
-
-        if (!inventory) {
+        const exists = await repository.existsInventory(item.productId, client);
+        if (!exists) {
           throw new ApiError(
             404,
             "PRODUCT_NOT_FOUND",
@@ -286,7 +213,9 @@ export class ReservationService {
           );
         }
 
-        if (inventory.reservedStock < item.quantity) {
+        // Confirmar = sale del reservado de forma definitiva.
+        const ok = await repository.confirmDecrement(item.productId, item.quantity, client);
+        if (!ok) {
           throw new ApiError(
             409,
             "INVALID_RESERVED_STOCK",
@@ -295,23 +224,10 @@ export class ReservationService {
         }
       }
 
-      for (const item of reservation.items) {
-        const inventory = repository.getInventory(item.productId)!;
-
-        // Confirmar = sale del reservado de forma definitiva
-        inventory.reservedStock -= item.quantity;
-        inventory.version += 1;
-        inventory.updatedAt = new Date();
-
-        repository.saveInventory(inventory);
-      }
-
+      await repository.updateReservationStatus(reservation.reservationId, "CONFIRMED", client);
       reservation.status = "CONFIRMED";
       reservation.updatedAt = new Date();
 
-      repository.saveReservation(reservation);
-      
-      // <-- MODIFICADO: Inyectar correlationId
       publisher.publishReservationConfirmed(correlationId, reservation);
 
       return reservation;
@@ -320,35 +236,26 @@ export class ReservationService {
 
   async releaseReservation(
     orderId: string,
-    correlationId: string // <-- AÑADIDO
+    correlationId: string
   ): Promise<Reservation> {
 
-    return reservationMutex.runExclusive(async () => {
+    if (!orderId || orderId.trim().length === 0) {
+      throw new ApiError(400, "INVALID_ORDER_ID", "orderId is required.");
+    }
 
-      if (!orderId || orderId.trim().length === 0) {
-        throw new ApiError(
-          400,
-          "INVALID_ORDER_ID",
-          "orderId is required."
-        );
-      }
+    return withTransaction(async (client) => {
 
-      const reservation = repository.getReservation(orderId);
+      const reservation = await repository.getReservation(orderId, client);
 
       if (!reservation) {
-        throw new ApiError(
-          404,
-          "RESERVATION_NOT_FOUND",
-          "Reservation not found."
-        );
+        throw new ApiError(404, "RESERVATION_NOT_FOUND", "Reservation not found.");
       }
 
-      // Idempotencia: si ya está liberada, devolver la misma
+      // Idempotencia: ya liberada -> devolver la misma.
       if (reservation.status === "RELEASED") {
         return reservation;
       }
 
-      // Solo se puede liberar desde RESERVED
       if (reservation.status !== "RESERVED") {
         throw new ApiError(
           409,
@@ -358,9 +265,8 @@ export class ReservationService {
       }
 
       for (const item of reservation.items) {
-        const inventory = repository.getInventory(item.productId);
-
-        if (!inventory) {
+        const exists = await repository.existsInventory(item.productId, client);
+        if (!exists) {
           throw new ApiError(
             404,
             "PRODUCT_NOT_FOUND",
@@ -368,7 +274,9 @@ export class ReservationService {
           );
         }
 
-        if (inventory.reservedStock < item.quantity) {
+        // Liberar = devolver reservado a disponible.
+        const ok = await repository.releaseRestore(item.productId, item.quantity, client);
+        if (!ok) {
           throw new ApiError(
             409,
             "INVALID_RESERVED_STOCK",
@@ -377,24 +285,10 @@ export class ReservationService {
         }
       }
 
-      for (const item of reservation.items) {
-        const inventory = repository.getInventory(item.productId)!;
-
-        // Liberar = devolver reservado a disponible
-        inventory.reservedStock -= item.quantity;
-        inventory.availableStock += item.quantity;
-        inventory.version += 1;
-        inventory.updatedAt = new Date();
-
-        repository.saveInventory(inventory);
-      }
-
+      await repository.updateReservationStatus(reservation.reservationId, "RELEASED", client);
       reservation.status = "RELEASED";
       reservation.updatedAt = new Date();
 
-      repository.saveReservation(reservation);
-      
-      // <-- MODIFICADO: Inyectar correlationId
       publisher.publishReservationReleased(correlationId, reservation);
 
       return reservation;
@@ -402,5 +296,4 @@ export class ReservationService {
   }
 }
 
-export const reservationService =
-  new ReservationService();
+export const reservationService = new ReservationService();

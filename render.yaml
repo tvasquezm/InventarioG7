@@ -13,3 +13,9 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
+      # Connection string de Supabase Postgres.
+      # sync: false => Render lo pide al desplegar; el valor NO se guarda en el repo.
+      - key: DATABASE_URL
+        sync: false
+      - key: DB_SCHEMA
+        value: inventario
