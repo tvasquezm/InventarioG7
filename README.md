@@ -65,8 +65,9 @@ Migramos la persistencia en memoria a **Supabase Postgres** (SQL relacional), ma
    ```bash
    cp .env.example .env
    ```
-   - `DATABASE_URL`: el URI del Supabase compartido (usa el directo, puerto **5432**; reemplaza la contraseña; si tiene caracteres especiales, codifícalos en URL, p. ej. espacio → `%20`).
-   - `DB_SCHEMA`: `inventario` (schema de G7 en el Supabase compartido).
+   - `DATABASE_URL`: el URI del **Session pooler** de Supabase (IPv4, host `...pooler.supabase.com:5432`, usuario `postgres.<project-ref>`). Reemplaza la contraseña; si tiene caracteres especiales, codifícalos en URL (espacio → `%20`).
+     > **No uses la conexión "directa"** (`db.<ref>.supabase.co`): resuelve por IPv6 y falla en redes solo-IPv4 como Render (`ENETUNREACH`). El **pooler** da IPv4 y funciona en todos lados.
+   - `DB_SCHEMA`: `inventario` (schema de G7 en el Supabase compartido). Las queries califican el schema, así que funciona aunque el pooler ignore el `search_path`.
    - El servicio usa el puerto **3006** (estándar del curso).
    - ⚠️ El `.env` está en `.gitignore`: la contraseña del compartido **nunca se sube** al repo.
 
@@ -170,7 +171,8 @@ Desplegado en **Render** (plan Free) con persistencia en **Supabase Postgres**.
 - **Health check:** https://inventario-g7.onrender.com/health
 - **Build:** `npm install && npm run build` · **Start:** `npm start`.
 - Render inyecta su propia variable `PORT`; el servicio la respeta automáticamente.
-- **Variable de entorno requerida en Render:** `DATABASE_URL` (el connection string del Supabase **compartido**). Se configura en el dashboard de Render (Environment), **no** en el repo. `DB_SCHEMA=inventario` ya viene declarada en `render.yaml`.
+- **Variable de entorno requerida en Render:** `DATABASE_URL` = el **Session pooler** del Supabase compartido (IPv4). Se configura en el dashboard de Render (Environment), **no** en el repo. `DB_SCHEMA=inventario` ya viene declarada en `render.yaml`.
+  > ⚠️ Render free sale **solo por IPv4**; la conexión directa de Supabase es IPv6 → usar **sí o sí el pooler** o el deploy falla con `ENETUNREACH`.
 - ⚠️ En el plan Free el servicio se duerme tras inactividad: el primer request tras un rato puede tardar ~30–60s (cold start). El estado **ya no se pierde** en el cold start: vive en Postgres.
 
 ---
