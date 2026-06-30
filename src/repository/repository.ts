@@ -3,7 +3,10 @@
 // Grupo 7 - Inventory Service - Fase 3 (E3 Cloud)
 // ======================================================
 
-import { pool, Db } from "../config/database";
+import { pool, Db, DB_SCHEMA } from "../config/database";
+
+// Schema calificado en cada query (no dependemos del search_path).
+const S = DB_SCHEMA;
 
 export interface Inventory {
   productId: string;
@@ -85,7 +88,7 @@ class Repository {
     db: Db = pool
   ): Promise<Inventory | undefined> {
     const res = await db.query(
-      `SELECT * FROM inventory WHERE product_id = $1`,
+      `SELECT * FROM ${S}.inventory WHERE product_id = $1`,
       [productId]
     );
     return res.rows[0] ? mapInventory(res.rows[0]) : undefined;
@@ -96,7 +99,7 @@ class Repository {
     db: Db = pool
   ): Promise<boolean> {
     const res = await db.query(
-      `SELECT 1 FROM inventory WHERE product_id = $1`,
+      `SELECT 1 FROM ${S}.inventory WHERE product_id = $1`,
       [productId]
     );
     return (res.rowCount ?? 0) > 0;
@@ -108,7 +111,7 @@ class Repository {
     db: Db = pool
   ): Promise<Inventory[]> {
     const res = await db.query(
-      `SELECT * FROM inventory
+      `SELECT * FROM ${S}.inventory
        ORDER BY product_id
        LIMIT $1 OFFSET $2`,
       [limit, offset]
@@ -117,7 +120,7 @@ class Repository {
   }
 
   async countInventory(db: Db = pool): Promise<number> {
-    const res = await db.query(`SELECT COUNT(*)::int AS total FROM inventory`);
+    const res = await db.query(`SELECT COUNT(*)::int AS total FROM ${S}.inventory`);
     return res.rows[0].total;
   }
 
@@ -126,7 +129,7 @@ class Repository {
     db: Db = pool
   ): Promise<void> {
     await db.query(
-      `INSERT INTO inventory
+      `INSERT INTO ${S}.inventory
          (product_id, available_stock, reserved_stock, version, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (product_id) DO NOTHING`,
@@ -154,14 +157,14 @@ class Repository {
 
     const sql =
       operation === "SET"
-        ? `UPDATE inventory
+        ? `UPDATE ${S}.inventory
               SET available_stock = $2,
                   reserved_stock  = 0,
                   version         = version + 1,
                   updated_at      = now()
             WHERE product_id = $1
           RETURNING *`
-        : `UPDATE inventory
+        : `UPDATE ${S}.inventory
               SET available_stock = available_stock + $2,
                   version         = version + 1,
                   updated_at      = now()
@@ -189,7 +192,7 @@ class Repository {
     db: Db
   ): Promise<number | null> {
     const res = await db.query(
-      `UPDATE inventory
+      `UPDATE ${S}.inventory
           SET available_stock = available_stock - $2,
               reserved_stock  = reserved_stock  + $2,
               version         = version + 1,
@@ -213,7 +216,7 @@ class Repository {
     db: Db
   ): Promise<boolean> {
     const res = await db.query(
-      `UPDATE inventory
+      `UPDATE ${S}.inventory
           SET reserved_stock = reserved_stock - $2,
               version        = version + 1,
               updated_at     = now()
@@ -234,7 +237,7 @@ class Repository {
     db: Db
   ): Promise<boolean> {
     const res = await db.query(
-      `UPDATE inventory
+      `UPDATE ${S}.inventory
           SET reserved_stock  = reserved_stock  - $2,
               available_stock = available_stock + $2,
               version         = version + 1,
@@ -257,7 +260,7 @@ class Repository {
   ): Promise<ReservationItem[]> {
     const res = await db.query(
       `SELECT product_id, quantity, available_stock_snapshot
-         FROM reservation_items
+         FROM ${S}.reservation_items
         WHERE reservation_id = $1`,
       [reservationId]
     );
@@ -285,7 +288,7 @@ class Repository {
     db: Db = pool
   ): Promise<Reservation | undefined> {
     const res = await db.query(
-      `SELECT * FROM reservations
+      `SELECT * FROM ${S}.reservations
         WHERE order_id = $1
         ORDER BY created_at DESC
         LIMIT 1`,
@@ -301,7 +304,7 @@ class Repository {
     db: Db = pool
   ): Promise<Reservation | undefined> {
     const res = await db.query(
-      `SELECT * FROM reservations WHERE idempotency_key = $1`,
+      `SELECT * FROM ${S}.reservations WHERE idempotency_key = $1`,
       [idempotencyKey]
     );
     return res.rows[0]
@@ -317,7 +320,7 @@ class Repository {
     db: Db
   ): Promise<void> {
     await db.query(
-      `INSERT INTO reservations
+      `INSERT INTO ${S}.reservations
          (reservation_id, order_id, status, idempotency_key, expires_at, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
@@ -333,7 +336,7 @@ class Repository {
 
     for (const item of reservation.items) {
       await db.query(
-        `INSERT INTO reservation_items
+        `INSERT INTO ${S}.reservation_items
            (reservation_id, product_id, quantity, available_stock_snapshot)
          VALUES ($1, $2, $3, $4)`,
         [
@@ -352,7 +355,7 @@ class Repository {
     db: Db
   ): Promise<void> {
     await db.query(
-      `UPDATE reservations
+      `UPDATE ${S}.reservations
           SET status = $2, updated_at = now()
         WHERE reservation_id = $1`,
       [reservationId, status]
@@ -369,7 +372,7 @@ class Repository {
   ): Promise<StockOperationRecord | undefined> {
     const res = await db.query(
       `SELECT product_id, operation, quantity
-         FROM stock_operations
+         FROM ${S}.stock_operations
         WHERE idempotency_key = $1`,
       [idempotencyKey]
     );
@@ -392,7 +395,7 @@ class Repository {
     db: Db = pool
   ): Promise<boolean> {
     const res = await db.query(
-      `INSERT INTO stock_operations
+      `INSERT INTO ${S}.stock_operations
          (idempotency_key, product_id, operation, quantity)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (idempotency_key) DO NOTHING`,
@@ -410,7 +413,7 @@ class Repository {
     db: Db = pool
   ): Promise<boolean> {
     const res = await db.query(
-      `SELECT 1 FROM processed_events WHERE event_id = $1`,
+      `SELECT 1 FROM ${S}.processed_events WHERE event_id = $1`,
       [eventId]
     );
     return (res.rowCount ?? 0) > 0;
@@ -422,7 +425,7 @@ class Repository {
     db: Db = pool
   ): Promise<void> {
     await db.query(
-      `INSERT INTO processed_events (event_id, event_type)
+      `INSERT INTO ${S}.processed_events (event_id, event_type)
        VALUES ($1, $2)
        ON CONFLICT (event_id) DO NOTHING`,
       [eventId, eventType]

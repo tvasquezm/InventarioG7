@@ -20,7 +20,9 @@ if (!connectionString) {
 
 // Schema dedicado del servicio (database-per-service por schema).
 // En el Supabase compartido del curso, el schema de G7 es 'inventario'.
-const DB_SCHEMA = process.env.DB_SCHEMA || "inventario";
+// Se usa para CALIFICAR las tablas en las queries (inventario.tabla), asi
+// no dependemos del search_path (que el pooler de Supabase puede ignorar).
+export const DB_SCHEMA = process.env.DB_SCHEMA || "inventario";
 
 export const pool = new Pool({
   connectionString,
