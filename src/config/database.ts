@@ -28,7 +28,8 @@ export const pool = new Pool({
   connectionString,
   // Supabase exige TLS.
   ssl: { rejectUnauthorized: false },
-  max: 10,
+  // Pool pequeno: somos buenos vecinos en la BD compartida del curso.
+  max: 5,
   // Cada conexion fisica apunta al schema del servicio desde el arranque,
   // asi las queries no necesitan calificar el schema a mano.
   options: `-c search_path=${DB_SCHEMA},public`
