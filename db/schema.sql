@@ -7,8 +7,8 @@
 --   2. Pegar TODO este archivo y Run.
 -- Es idempotente: se puede correr varias veces sin romper nada.
 --
--- Usa el schema dedicado 'inventario' (database-per-service por schema),
--- asi convive con otros grupos en el mismo proyecto Supabase compartido.
+-- Usa el schema dedicado 'inventario' dentro del proyecto Supabase PROPIO de G7
+-- (cada grupo tiene su propia base de datos; ya no se comparte proyecto).
 -- ======================================================
 
 CREATE SCHEMA IF NOT EXISTS inventario;

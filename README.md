@@ -24,7 +24,7 @@ En esta fase implementamos el contrato definido en la Fase 1 con un servidor fun
 
 ### ☁️ Fase 3: Cloud y Persistencia Real (Estado Actual)
 Migramos la persistencia en memoria a **Supabase Postgres** (SQL relacional), manteniendo el mismo contrato y comportamiento. El cambio clave es el **control de concurrencia**: pasamos del `async-mutex` (que solo protege dentro de un proceso) a una **transacción de base de datos con `UPDATE ... WHERE available_stock >= qty`**, que serializa las reservas a nivel de fila. Esto resiste el **escalamiento horizontal**: aunque Render levante varias instancias, el lock vive en la BD y no hay sobreventa.
-* **Persistencia SQL:** las 5 tablas del modelo de datos en Postgres (`db/schema.sql`), schema dedicado `inventario` (en el Supabase compartido del curso).
+* **Persistencia SQL:** las 5 tablas del modelo de datos en Postgres (`db/schema.sql`), schema dedicado `inventario` (en el proyecto Supabase **propio de G7**: cada grupo tiene su propia base de datos).
 * **Concurrencia real:** reserva todo-o-nada dentro de `BEGIN/COMMIT`; el `UPDATE` condicional descuenta solo si hay stock (si afecta 0 filas → `422 OUT_OF_STOCK`).
 * **Idempotencia persistente:** las claves de idempotencia (reservas y operaciones de stock) y los eventos procesados viven en tablas, no en memoria.
 * **Configuración por entorno:** el connection string se inyecta por `DATABASE_URL` (nunca se commitea).
@@ -57,19 +57,19 @@ Migramos la persistencia en memoria a **Supabase Postgres** (SQL relacional), ma
    npm install
    ```
 
-3. **Base de datos (Supabase compartido del curso):**
-   - El servicio usa el **Supabase compartido del equipo** (schema `inventario`). **No crees un proyecto propio**: pide al equipo el **connection string** del proyecto compartido.
+3. **Base de datos (proyecto Supabase propio de G7):**
+   - Cada grupo tiene su **propia base de datos**: el servicio usa el proyecto Supabase de G7 (schema `inventario`). Pide al equipo el **connection string** del proyecto del grupo.
    - Las 5 tablas y el seed **ya están creados** en ese proyecto. Solo hay que (re)ejecutar `db/schema.sql` si se levanta una BD nueva desde cero (es idempotente: no pisa datos existentes).
 
-4. **Crear el archivo `.env`** a partir del ejemplo y pegar el connection string del compartido:
+4. **Crear el archivo `.env`** a partir del ejemplo y pegar el connection string del proyecto del grupo:
    ```bash
    cp .env.example .env
    ```
    - `DATABASE_URL`: el URI del **Session pooler** de Supabase (IPv4, host `...pooler.supabase.com:5432`, usuario `postgres.<project-ref>`). Reemplaza la contraseña; si tiene caracteres especiales, codifícalos en URL (espacio → `%20`).
      > **No uses la conexión "directa"** (`db.<ref>.supabase.co`): resuelve por IPv6 y falla en redes solo-IPv4 como Render (`ENETUNREACH`). El **pooler** da IPv4 y funciona en todos lados.
-   - `DB_SCHEMA`: `inventario` (schema de G7 en el Supabase compartido). Las queries califican el schema, así que funciona aunque el pooler ignore el `search_path`.
+   - `DB_SCHEMA`: `inventario` (schema dedicado del servicio dentro del proyecto propio). Las queries califican el schema, así que funciona aunque el pooler ignore el `search_path`.
    - El servicio usa el puerto **3006** (estándar del curso).
-   - ⚠️ El `.env` está en `.gitignore`: la contraseña del compartido **nunca se sube** al repo.
+   - ⚠️ El `.env` está en `.gitignore`: la contraseña de la BD **nunca se sube** al repo.
 
 5. **Levantar en modo desarrollo** (recarga en caliente con `tsx`):
    ```bash
@@ -171,7 +171,7 @@ Desplegado en **Render** (plan Free) con persistencia en **Supabase Postgres**.
 - **Health check:** https://inventario-g7.onrender.com/health
 - **Build:** `npm install && npm run build` · **Start:** `npm start`.
 - Render inyecta su propia variable `PORT`; el servicio la respeta automáticamente.
-- **Variable de entorno requerida en Render:** `DATABASE_URL` = el **Session pooler** del Supabase compartido (IPv4). Se configura en el dashboard de Render (Environment), **no** en el repo. `DB_SCHEMA=inventario` ya viene declarada en `render.yaml`.
+- **Variable de entorno requerida en Render:** `DATABASE_URL` = el **Session pooler** del proyecto Supabase de G7 (IPv4). Se configura en el dashboard de Render (Environment), **no** en el repo. `DB_SCHEMA=inventario` ya viene declarada en `render.yaml`.
   > ⚠️ Render free sale **solo por IPv4**; la conexión directa de Supabase es IPv6 → usar **sí o sí el pooler** o el deploy falla con `ENETUNREACH`.
 - ⚠️ En el plan Free el servicio se duerme tras inactividad: el primer request tras un rato puede tardar ~30–60s (cold start). El estado **ya no se pierde** en el cold start: vive en Postgres.
 

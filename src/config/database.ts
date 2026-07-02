@@ -18,17 +18,18 @@ if (!connectionString) {
   );
 }
 
-// Schema dedicado del servicio (database-per-service por schema).
-// En el Supabase compartido del curso, el schema de G7 es 'inventario'.
-// Se usa para CALIFICAR las tablas en las queries (inventario.tabla), asi
-// no dependemos del search_path (que el pooler de Supabase puede ignorar).
+// Schema dedicado del servicio (database-per-service).
+// La BD es propia del grupo: el schema de G7 es 'inventario' y vive solo
+// en nuestro proyecto Supabase. Se usa para CALIFICAR las tablas en las
+// queries (inventario.tabla), asi no dependemos del search_path (que el
+// pooler de Supabase puede ignorar).
 export const DB_SCHEMA = process.env.DB_SCHEMA || "inventario";
 
 export const pool = new Pool({
   connectionString,
   // Supabase exige TLS.
   ssl: { rejectUnauthorized: false },
-  // Pool pequeno: somos buenos vecinos en la BD compartida del curso.
+  // Pool acotado: Render free + plan free de Supabase tienen pocas conexiones.
   max: 5,
   // Cada conexion fisica apunta al schema del servicio desde el arranque,
   // asi las queries no necesitan calificar el schema a mano.
