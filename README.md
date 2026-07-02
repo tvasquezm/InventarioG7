@@ -38,6 +38,10 @@ E3 es autocontenido (persistencia + endpoints); la integración real es E4. Esto
   `OrderCreated` de G5 (su payload ya lo trae) y se persiste en una columna `user_id` de `reservations`.
 * **Consumidores de eventos:** `OrderCreated` (G5), `PaymentApproved`/`PaymentRejected` (G6, con capa de
   adaptación de su sobre no estándar) y `ProductCreated` (G3).
+* **Protección de la carga de stock (contrato REST v1.1):** `POST /inventory/{id}/stock` pasará a exigir
+  `Authorization: Bearer <jwt>` validando token y rol `admin` contra `GET /auth/validate` de **G2**
+  (401/403 ya declarados en el contrato). Solo ese endpoint: reserva/confirmación/liberación son
+  servicio-a-servicio (G5) y las lecturas son públicas. Requiere pedir a G2 un usuario admin de prueba.
 
 ---
 
