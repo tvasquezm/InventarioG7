@@ -29,6 +29,16 @@ Migramos la persistencia en memoria a **Supabase Postgres** (SQL relacional), ma
 * **Idempotencia persistente:** las claves de idempotencia (reservas y operaciones de stock) y los eventos procesados viven en tablas, no en memoria.
 * **Configuración por entorno:** el connection string se inyecta por `DATABASE_URL` (nunca se commitea).
 
+### 🔜 Pendiente para E4 (Integración) — declarado, no implementado
+E3 es autocontenido (persistencia + endpoints); la integración real es E4. Estos puntos ya están
+**versionados en el contrato de eventos** y se implementan en E4:
+* **Publisher real:** reemplazar el mock (consola) por **Supabase Realtime**, canal `inventory.events`.
+* **Sobre completo del evento:** agregar `version` y `producer: "inventory-service"` (hoy el mock no los emite).
+* **`StockRejected` v1.1:** incluir `userId` en el payload (lo requiere G9 para notificar). Se captura del
+  `OrderCreated` de G5 (su payload ya lo trae) y se persiste en una columna `user_id` de `reservations`.
+* **Consumidores de eventos:** `OrderCreated` (G5), `PaymentApproved`/`PaymentRejected` (G6, con capa de
+  adaptación de su sobre no estándar) y `ProductCreated` (G3).
+
 ---
 
 ## ⚙️ Arquitectura Técnica (Fase 3)
