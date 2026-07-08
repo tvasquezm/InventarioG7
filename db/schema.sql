@@ -71,6 +71,30 @@ CREATE TABLE IF NOT EXISTS inventario.stock_operations (
 );
 
 -- ------------------------------------------------------
+-- outbox_events: patron Outbox (Fase 4 - eventos reales)
+-- El evento se inserta EN LA MISMA transaccion que cambia el
+-- stock; un dispatcher lo publica despues a RabbitMQ (CloudAMQP,
+-- exchange payments.events) y marca published_at. Garantiza que
+-- no se publican eventos de transacciones que hicieron ROLLBACK
+-- (entrega al menos una vez; los consumidores deduplican por event_id).
+-- ------------------------------------------------------
+CREATE TABLE IF NOT EXISTS inventario.outbox_events (
+    id              bigserial PRIMARY KEY,
+    event_id        uuid NOT NULL UNIQUE,
+    event_type      text NOT NULL,
+    routing_key     text NOT NULL,
+    version         text NOT NULL DEFAULT '1.0',
+    correlation_id  text,
+    payload         jsonb NOT NULL,
+    occurred_at     timestamptz NOT NULL DEFAULT now(),
+    published_at    timestamptz,
+    created_at      timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_outbox_pending
+    ON inventario.outbox_events(id) WHERE published_at IS NULL;
+
+-- ------------------------------------------------------
 -- Indices
 -- ------------------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_reservations_order

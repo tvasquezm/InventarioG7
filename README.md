@@ -142,6 +142,33 @@ curl -X POST https://inventario-g7.onrender.com/inventory/sync-catalog \
 # → { "catalogProducts": 18, "created": 3, "alreadyTracked": 15, "skippedInactive": 0, ... }
 ```
 
+### Eventos reales — RabbitMQ + patrón Outbox (Fase 4)
+
+Desde E4 los eventos **se publican de verdad** al bus compartido del curso:
+**RabbitMQ en CloudAMQP, exchange topic `payments.events`** (el mismo que usan G5 y
+G6), con routing key = `eventType`. El mock de consola quedó atrás.
+
+**Patrón Outbox** (`src/events/publisher.ts` + `src/events/dispatcher.ts` + tabla
+`inventario.outbox_events`): el evento se inserta **en la misma transacción** que
+cambia el stock — si la transacción hace ROLLBACK, el evento nunca existió (sin
+eventos fantasma). Un dispatcher lo publica después (cada 5s, lotes con
+`FOR UPDATE SKIP LOCKED`: seguro con varias instancias) y marca `published_at`.
+Entrega *al menos una vez*: los consumidores deduplican por `eventId`.
+
+| Evento | Cuándo | Consumidor esperado |
+|---|---|---|
+| `StockReserved` | Reserva creada | G10 |
+| `StockConfirmed` | Reserva confirmada (pago OK) | G10 |
+| `InventoryReleased` | Reserva liberada (antes `StockReleased`, renombrado para G5) | **G5** (ya suscrito), G10 |
+| `StockRejected` | Reserva rechazada por falta de stock (se publica tras el ROLLBACK) | G9 |
+| `StockChanged` | Carga/reposición de stock (admin) | G3 (refresca `stock_visible`) |
+
+Sobre estándar del curso: `eventId`, `eventType`, `version`, `occurredAt`,
+`producer: "inventory-service"`, `correlationId`, `payload`.
+Configuración: `RABBITMQ_URL` (ver `.env.example`; en Render se define en el
+dashboard). Sin la variable, el servicio funciona igual y los eventos quedan
+encolados en el outbox hasta que haya broker.
+
 ### Integración con identidad (G2) — Fase 4
 
 Desde E4, `POST /inventory/:productId/stock` (la única vía de entrada de stock al

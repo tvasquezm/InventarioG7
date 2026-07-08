@@ -1,134 +1,143 @@
 // ======================================================
-// Publisher - Mock Event Publisher
+// Publisher - Outbox Event Publisher (Fase 4)
 // Grupo 7 - Inventory Service
 // ======================================================
+//
+// Fase 2/3: los eventos se imprimian en consola (mock).
+// Fase 4: patron OUTBOX. Cada metodo inserta el evento en
+// inventario.outbox_events DENTRO de la transaccion que cambia el
+// stock; el dispatcher (events/dispatcher.ts) lo publica despues a
+// RabbitMQ (CloudAMQP, exchange payments.events) y marca published_at.
+//
+// Por que: si el evento se publicara directo dentro de la transaccion
+// y el COMMIT fallara, el ecosistema recibiria un evento de algo que
+// nunca ocurrio (evento fantasma). Con outbox, evento y cambio de stock
+// se confirman o se descartan JUNTOS.
 
 import crypto from "crypto";
-import { Reservation } from "../repository/repository";
+import { Db, pool } from "../config/database";
+import { repository, Reservation } from "../repository/repository";
 
+// Sobre estandar de eventos del curso.
 export interface InventoryEvent<TPayload = unknown> {
   eventId: string;
   eventType: string;
+  version: string;
   occurredAt: string;
-  correlationId: string; // <-- AÑADIDO: Requerido por trazabilidad
+  producer: string;
+  correlationId: string;
   payload: TPayload;
 }
 
+const PRODUCER = "inventory-service";
+
 export class Publisher {
 
-  publish<TPayload>(
-    event: InventoryEvent<TPayload>
-  ): void {
-
-    console.log("======================================");
-    console.log(` 📦 Inventory Event Published: ${event.eventType}`);
-    console.log("======================================");
-    console.log(JSON.stringify(event, null, 2));
-    console.log("======================================");
-
-  }
-
-  // <-- MODIFICADO: Recibe correlationId
-  publishReservationCreated(
+  /**
+   * Encola el evento en el outbox (misma transaccion que el cambio de
+   * stock si se pasa el client; con pool queda en transaccion propia).
+   * El routing key en el exchange topic es el eventType, igual que G5.
+   */
+  private async enqueue<TPayload>(
+    eventType: string,
     correlationId: string,
-    reservation: Reservation
-  ): void {
+    payload: TPayload,
+    db: Db,
+    version: string = "1.0"
+  ): Promise<void> {
 
-    this.publish({
+    const event: InventoryEvent<TPayload> = {
       eventId: crypto.randomUUID(),
-      eventType: "StockReserved",
+      eventType,
+      version,
       occurredAt: new Date().toISOString(),
-      correlationId,
-      payload: {
-        reservationId: reservation.reservationId,
-        orderId: reservation.orderId,
-        status: reservation.status,
-        items: reservation.items,
-        expiresAt: reservation.expiresAt
-      }
-    });
-
-  }
-
-  // <-- MODIFICADO: Recibe correlationId
-  publishReservationConfirmed(
-    correlationId: string,
-    reservation: Reservation
-  ): void {
-
-    this.publish({
-      eventId: crypto.randomUUID(),
-      eventType: "StockConfirmed",
-      occurredAt: new Date().toISOString(),
-      correlationId,
-      payload: {
-        reservationId: reservation.reservationId,
-        orderId: reservation.orderId,
-        status: reservation.status,
-        items: reservation.items
-      }
-    });
-
-  }
-
-  // <-- MODIFICADO: Recibe correlationId
-  publishReservationReleased(
-    correlationId: string,
-    reservation: Reservation
-  ): void {
-
-    this.publish({
-      eventId: crypto.randomUUID(),
-      eventType: "StockReleased",
-      occurredAt: new Date().toISOString(),
-      correlationId,
-      payload: {
-        reservationId: reservation.reservationId,
-        orderId: reservation.orderId,
-        status: reservation.status,
-        items: reservation.items
-      }
-    });
-
-  }
-
-  // <-- AÑADIDO: Evento obligatorio de Fase 2 para cancelar ordenes sin stock
-  publishStockRejected(
-    correlationId: string,
-    payload: { orderId: string; reason: string; items: any[] }
-  ): void {
-
-    this.publish({
-      eventId: crypto.randomUUID(),
-      eventType: "StockRejected",
-      occurredAt: new Date().toISOString(),
+      producer: PRODUCER,
       correlationId,
       payload
-    });
+    };
 
+    await repository.insertOutboxEvent(event, eventType, db);
+
+    console.log(
+      `[outbox] encolado ${eventType} eventId=${event.eventId} ` +
+      `correlationId=${correlationId}`
+    );
   }
 
-  // <-- AÑADIDO: Evento obligatorio de Fase 2 para cuando se repone stock manual
-  publishStockChanged(
+  async publishReservationCreated(
+    correlationId: string,
+    reservation: Reservation,
+    db: Db
+  ): Promise<void> {
+    await this.enqueue("StockReserved", correlationId, {
+      reservationId: reservation.reservationId,
+      orderId: reservation.orderId,
+      status: reservation.status,
+      items: reservation.items,
+      expiresAt: reservation.expiresAt
+    }, db);
+  }
+
+  async publishReservationConfirmed(
+    correlationId: string,
+    reservation: Reservation,
+    db: Db
+  ): Promise<void> {
+    await this.enqueue("StockConfirmed", correlationId, {
+      reservationId: reservation.reservationId,
+      orderId: reservation.orderId,
+      status: reservation.status,
+      items: reservation.items
+    }, db);
+  }
+
+  /**
+   * Liberacion de reserva. eventType/routing key: InventoryReleased
+   * (nombre acordado con G5: su consumidor ya esta suscrito a esa key;
+   * antes lo llamabamos StockReleased, renombrado en el contrato v1.4).
+   */
+  async publishReservationReleased(
+    correlationId: string,
+    reservation: Reservation,
+    db: Db
+  ): Promise<void> {
+    await this.enqueue("InventoryReleased", correlationId, {
+      reservationId: reservation.reservationId,
+      orderId: reservation.orderId,
+      status: reservation.status,
+      items: reservation.items
+    }, db);
+  }
+
+  /**
+   * Reserva rechazada por falta de stock. OJO: se llama DESPUES del
+   * ROLLBACK de la reserva (con pool, no con el client de la transaccion
+   * abortada): el rechazo si debe publicarse aunque la reserva no exista.
+   */
+  async publishStockRejected(
+    correlationId: string,
+    payload: { orderId: string; reason: string; items: any[] }
+  ): Promise<void> {
+    await this.enqueue("StockRejected", correlationId, payload, pool);
+  }
+
+  async publishStockChanged(
     productId: string,
-    inventoryResponse: any,
-    correlationId: string
-  ): void {
-
-    this.publish({
-      eventId: crypto.randomUUID(),
-      eventType: "StockChanged",
-      occurredAt: new Date().toISOString(),
-      correlationId,
-      payload: {
-        productId,
-        availableStock: inventoryResponse.availableStock,
-        totalStock: inventoryResponse.totalStock,
-        // virtualStock = stock vendible (lo que G3 debe reflejar en stockVisible)
-        virtualStock: inventoryResponse.virtualStock
-      }
-    });
-
+    inventoryView: {
+      availableStock: number;
+      totalStock: number;
+      virtualStock: number;
+    },
+    correlationId: string,
+    db: Db
+  ): Promise<void> {
+    await this.enqueue("StockChanged", correlationId, {
+      productId,
+      availableStock: inventoryView.availableStock,
+      totalStock: inventoryView.totalStock,
+      // virtualStock = stock vendible (lo que G3 debe reflejar en stock_visible)
+      virtualStock: inventoryView.virtualStock
+    }, db);
   }
 
 }

@@ -207,15 +207,13 @@ export class InventoryController {
           client
         );
 
-        return {
-          view: repository.toInventoryView(updated),
-          replay: false
-        };
-      });
+        const view = repository.toInventoryView(updated);
 
-      if (!result.replay) {
-        publisher.publishStockChanged(rawProductId, result.view, correlationId);
-      }
+        // Outbox: el StockChanged se confirma junto con el cambio de stock.
+        await publisher.publishStockChanged(rawProductId, view, correlationId, client);
+
+        return { view, replay: false };
+      });
 
       res.status(200).json(result.view);
 

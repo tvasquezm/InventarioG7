@@ -81,6 +81,34 @@ export class ReservationService {
     // concurrencia real (UPDATE condicional + locks de fila).
     // ========================================
 
+    try {
+      return await this.reserveStockTx(request);
+    } catch (error) {
+      // El rechazo por falta de stock SI se publica (fuera de la
+      // transaccion abortada: el outbox de una tx con ROLLBACK no existe).
+      if (error instanceof ApiError && error.code === "OUT_OF_STOCK") {
+        await publisher.publishStockRejected(correlationId, {
+          orderId,
+          reason: error.message,
+          items
+        });
+      }
+      throw error;
+    }
+  }
+
+  private async reserveStockTx(
+    request: ReserveStockRequest
+  ): Promise<ReserveStockResult> {
+
+    const {
+      orderId,
+      idempotencyKey,
+      items,
+      ttlMinutes = DEFAULT_RESERVATION_TTL_MINUTES,
+      correlationId
+    } = request;
+
     return withTransaction(async (client) => {
 
       // --- Idempotencia ---
@@ -138,11 +166,7 @@ export class ReservationService {
           await repository.reserveDecrement(item.productId, item.quantity, client);
 
         if (remaining === null) {
-          publisher.publishStockRejected(correlationId, {
-            orderId,
-            reason: `Insufficient stock for product ${item.productId}.`,
-            items
-          });
+          // El StockRejected lo publica reserveStock() tras el ROLLBACK.
           throw new ApiError(
             422,
             "OUT_OF_STOCK",
@@ -174,7 +198,8 @@ export class ReservationService {
 
       await repository.insertReservation(reservation, client);
 
-      publisher.publishReservationCreated(correlationId, reservation);
+      // Outbox: se confirma junto con la reserva (misma transaccion).
+      await publisher.publishReservationCreated(correlationId, reservation, client);
 
       return { reservation, isIdempotentReplay: false };
     });
@@ -256,7 +281,8 @@ export class ReservationService {
       reservation.status = "CONFIRMED";
       reservation.updatedAt = new Date();
 
-      publisher.publishReservationConfirmed(correlationId, reservation);
+      // Outbox: se confirma junto con la transicion de estado.
+      await publisher.publishReservationConfirmed(correlationId, reservation, client);
 
       return reservation;
     });
@@ -337,7 +363,8 @@ export class ReservationService {
       reservation.status = "RELEASED";
       reservation.updatedAt = new Date();
 
-      publisher.publishReservationReleased(correlationId, reservation);
+      // Outbox: routing key InventoryReleased (la que espera G5).
+      await publisher.publishReservationReleased(correlationId, reservation, client);
 
       return reservation;
     });

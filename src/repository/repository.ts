@@ -437,6 +437,87 @@ class Repository {
   }
 
   // ========================================
+  // OUTBOX (publicacion transaccional de eventos)
+  // ========================================
+
+  async insertOutboxEvent(
+    event: {
+      eventId: string;
+      eventType: string;
+      version: string;
+      occurredAt: string;
+      correlationId: string;
+      payload: unknown;
+    },
+    routingKey: string,
+    db: Db
+  ): Promise<void> {
+    await db.query(
+      `INSERT INTO ${S}.outbox_events
+         (event_id, event_type, routing_key, version, correlation_id, payload, occurred_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        event.eventId,
+        event.eventType,
+        routingKey,
+        event.version,
+        event.correlationId ?? null,
+        JSON.stringify(event.payload),
+        event.occurredAt
+      ]
+    );
+  }
+
+  /**
+   * Toma un lote de eventos pendientes con FOR UPDATE SKIP LOCKED:
+   * varias instancias del servicio pueden despachar en paralelo sin
+   * publicar el mismo evento dos veces.
+   */
+  async claimPendingOutbox(
+    limit: number,
+    db: Db
+  ): Promise<
+    {
+      id: number;
+      eventId: string;
+      eventType: string;
+      routingKey: string;
+      version: string;
+      correlationId: string | null;
+      payload: unknown;
+      occurredAt: Date;
+    }[]
+  > {
+    const res = await db.query(
+      `SELECT * FROM ${S}.outbox_events
+        WHERE published_at IS NULL
+        ORDER BY id ASC
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED`,
+      [limit]
+    );
+    return res.rows.map((r: any) => ({
+      id: r.id,
+      eventId: r.event_id,
+      eventType: r.event_type,
+      routingKey: r.routing_key,
+      version: r.version,
+      correlationId: r.correlation_id,
+      payload: r.payload,
+      occurredAt: r.occurred_at
+    }));
+  }
+
+  async markOutboxPublished(id: number, db: Db): Promise<void> {
+    await db.query(
+      `UPDATE ${S}.outbox_events
+          SET published_at = now()
+        WHERE id = $1`,
+      [id]
+    );
+  }
+
+  // ========================================
   // EVENTOS (idempotencia de consumo)
   // ========================================
 

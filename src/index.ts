@@ -11,6 +11,7 @@ import fs from "fs";
 import inventoryRoutes from "./routes/inventory.routes";
 
 import { pingDatabase } from "./config/database";
+import { startOutboxDispatcher } from "./events/dispatcher";
 import { headersMiddleware } from "./middlewares/headers.middleware";
 import { errorMiddleware } from "./middlewares/error.middleware";
 
@@ -70,6 +71,9 @@ app.use(errorMiddleware);
 async function start() {
   await pingDatabase();
   console.log("✓ Conexion a Postgres (Supabase) OK");
+
+  // Publica los eventos del outbox a RabbitMQ (Fase 4).
+  startOutboxDispatcher();
 
   app.listen(PORT, () => {
     console.log("======================================");
