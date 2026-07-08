@@ -142,6 +142,37 @@ curl -X POST https://inventario-g7.onrender.com/inventory/sync-catalog \
 # → { "catalogProducts": 18, "created": 3, "alreadyTracked": 15, "skippedInactive": 0, ... }
 ```
 
+### Integración con identidad (G2) — Fase 4
+
+Desde E4, `POST /inventory/:productId/stock` (la única vía de entrada de stock al
+sistema) **exige `Authorization: Bearer <jwt>` con rol `admin`**. El middleware
+(`src/middlewares/auth.middleware.ts`) valida el token contra `GET /auth/validate`
+de G2 en cada petición:
+
+| Caso | Respuesta |
+|---|---|
+| Sin token / token inválido o expirado | `401 UNAUTHORIZED` |
+| Token válido pero rol ≠ `admin` | `403 FORBIDDEN` |
+| G2 caído / timeout | `502 AUTH_UNAVAILABLE` / `504 AUTH_TIMEOUT` (fail closed) |
+
+Para obtener un token admin en demos se usa el usuario sembrado por G2
+(documentado en su README): `maria@correo.cl` / `AdminClave123`.
+
+```bash
+TOKEN=$(curl -s -X POST https://auth-minimarket-cloud.onrender.com/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"maria@correo.cl","password":"AdminClave123"}' | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+
+curl -X POST https://inventario-g7.onrender.com/inventory/<productId>/stock \
+  -H "Authorization: Bearer $TOKEN" -H "X-Consumer: inventory-admin" \
+  -H "Idempotency-Key: $(uuidgen)" -H "Content-Type: application/json" \
+  -d '{"quantity": 10, "operation": "SET"}'
+```
+
+Reserva/confirmación/liberación **no** llevan JWT (son llamadas
+servicio-a-servicio de G5) y las lecturas siguen siendo públicas.
+Configuración: `AUTH_BASE_URL` (ver `.env.example`).
+
 ---
 
 ## 📨 Headers obligatorios

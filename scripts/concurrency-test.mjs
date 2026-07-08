@@ -14,14 +14,33 @@ const BASE_URL = process.argv[2] || "https://inventario-g7.onrender.com";
 const N = Number(process.argv[3] || 10);
 const PRODUCT_ID = "660e8400-e29b-41d4-a716-446655440111";
 
+// Desde E4 la carga de stock exige JWT admin (validado contra G2).
+// Usuario admin sembrado por G2 (documentado en su README).
+const AUTH_URL = process.env.AUTH_BASE_URL || "https://auth-minimarket-cloud.onrender.com";
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "maria@correo.cl";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "AdminClave123";
+
 const uuid = () => crypto.randomUUID();
 
-async function resetStockToOne() {
+async function getAdminToken() {
+  const res = await fetch(`${AUTH_URL}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Consumer": "concurrency-test" },
+    body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD })
+  });
+  if (!res.ok) throw new Error(`No se pudo obtener el token admin de G2: HTTP ${res.status}`);
+  const body = await res.json();
+  console.log(`Login admin OK (${ADMIN_EMAIL} via G2).`);
+  return body.access_token;
+}
+
+async function resetStockToOne(adminToken) {
   // SET deja availableStock = 1 y reservedStock = 0 (estado limpio).
   const res = await fetch(`${BASE_URL}/inventory/${PRODUCT_ID}/stock`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "Authorization": `Bearer ${adminToken}`,
       "X-Consumer": "concurrency-test",
       "X-Correlation-Id": uuid(),
       "Idempotency-Key": uuid()
@@ -55,7 +74,8 @@ async function main() {
   console.log(`Producto : ${PRODUCT_ID}`);
   console.log(`Peticiones paralelas: ${N}\n`);
 
-  await resetStockToOne();
+  const adminToken = await getAdminToken();
+  await resetStockToOne(adminToken);
 
   // Disparo simultaneo: todas las promesas se lanzan antes de esperar ninguna.
   const results = await Promise.all(

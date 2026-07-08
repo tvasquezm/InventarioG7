@@ -1,6 +1,7 @@
 import { Router } from "express";
 
 import { inventoryController } from "../controllers/inventory.controller";
+import { requireAdmin } from "../middlewares/auth.middleware";
 
 const router = Router();
 
@@ -30,9 +31,11 @@ router.get(
 
 /**
  * POST /inventory/:productId/stock
+ * Protegido: exige JWT con rol admin, validado contra G2 (contrato v1.1).
  */
 router.post(
   "/inventory/:productId/stock",
+  requireAdmin,
   inventoryController.setStock.bind(inventoryController)
 );
 
