@@ -37,6 +37,14 @@ router.post(
 );
 
 /**
+ * POST /inventory/sync-catalog (integracion con G3)
+ */
+router.post(
+  "/inventory/sync-catalog",
+  inventoryController.syncCatalog.bind(inventoryController)
+);
+
+/**
  * POST /inventory/reserve
  */
 router.post(

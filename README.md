@@ -108,6 +108,7 @@ El servicio queda disponible en `http://localhost:3006` y la documentación inte
 | `GET`  | `/inventory/:productId` | Devuelve el inventario de un producto |
 | `GET`  | `/inventory/:productId/stock` | Devuelve el stock de un producto |
 | `POST` | `/inventory/:productId/stock` | Fija/incrementa stock (`SET` o `ADD`) — idempotente |
+| `POST` | `/inventory/sync-catalog` | Sincroniza el catálogo de G3: crea el inventario de productos nuevos (idempotente) |
 | `POST` | `/inventory/reserve` | Reserva stock para una orden (todo-o-nada) |
 | `POST` | `/inventory/confirm` | Confirma una reserva (pago aprobado) |
 | `POST` | `/inventory/release` | Libera una reserva (pago rechazado / cancelación) |
@@ -119,6 +120,27 @@ La definición completa está en `openapi/contrato-REST-inventario.yaml` y se si
 - `reservedStock`: stock reservado esperando confirmación de pago.
 - `totalStock`: físico en bodega = `availableStock + reservedStock`.
 - `virtualStock`: stock vendible = `totalStock − reservedStock` (coincide con `availableStock`).
+
+### Integración con el catálogo (G3) — Fase 4
+
+`POST /inventory/sync-catalog` consume el API REST de G3 (`GET /products`, paginado) y
+crea la fila de inventario de cada producto del catálogo que aún no exista, con
+`availableStock` inicial = `stock_visible` del catálogo (mismo criterio del seed de E3,
+que se hacía a mano). Los productos ya inventariados **no se tocan** y los inactivos se
+omiten: re-ejecutar la sincronización es idempotente.
+
+- El cliente (`src/clients/catalog.client.ts`) envía los headers obligatorios de G3
+  (`X-Request-Id`, `X-Correlation-Id`, `X-Consumer`) propagando el `correlationId` del
+  flujo, con timeout configurable (`CATALOG_TIMEOUT_MS`) por el cold start de Render free.
+- Errores de integración mapeados: G3 caído → `502 CATALOG_UNAVAILABLE`, timeout →
+  `504 CATALOG_TIMEOUT`, respuesta no exitosa → `502 CATALOG_ERROR`.
+- Configuración: `CATALOG_BASE_URL` (ver `.env.example`).
+
+```bash
+curl -X POST https://inventario-g7.onrender.com/inventory/sync-catalog \
+  -H "X-Consumer: inventory-admin" -H "X-Correlation-Id: demo-sync-1"
+# → { "catalogProducts": 18, "created": 3, "alreadyTracked": 15, "skippedInactive": 0, ... }
+```
 
 ---
 

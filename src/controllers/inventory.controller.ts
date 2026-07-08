@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { reservationService } from "../domain/reservations";
+import { catalogSyncService } from "../domain/catalog-sync";
 import { repository } from "../repository/repository";
 import { withTransaction } from "../config/database";
 import { ApiError } from "../middlewares/error.middleware";
@@ -217,6 +218,32 @@ export class InventoryController {
       }
 
       res.status(200).json(result.view);
+
+    }
+    catch (error) {
+      next(error);
+    }
+
+  }
+
+  /**
+   * POST /inventory/sync-catalog
+   * Integracion REST con G3: crea la fila de inventario de cada
+   * producto del catalogo que aun no exista (idempotente).
+   */
+  async syncCatalog(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+
+    try {
+
+      const correlationId = req.headers["x-correlation-id"] as string;
+
+      const result = await catalogSyncService.syncCatalog(correlationId);
+
+      res.status(200).json(result);
 
     }
     catch (error) {
