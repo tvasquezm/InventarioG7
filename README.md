@@ -227,6 +227,23 @@ node scripts/concurrency-test.mjs http://localhost:3006 20
 
 El script resetea el producto a 1 unidad (operación `SET`), lanza las reservas con `Promise.all` y afirma el resultado (sale con código 0 si pasa, 1 si falla).
 
+### Pruebas de concurrencia del ciclo de vida (E4)
+
+`scripts/concurrency-lifecycle-test.mjs` cubre las carreras del resto del ciclo de la
+reserva, cada una con su guarda a nivel de base de datos:
+
+| Carrera | Resultado esperado | Guarda |
+|---|---|---|
+| Doble reserva del mismo `orderId` (claves distintas, en paralelo) | 1×`201`, resto `409`; stock descontado una vez | Índice único parcial `uq_reservations_active_order` |
+| `confirm` y `release` simultáneos del mismo pedido | 1×`200`, el otro `409`; un solo efecto en el stock | `SELECT ... FOR UPDATE` + transición de estado condicional |
+| Replay concurrente de la misma `Idempotency-Key` | 1×`201`, resto `200`/`409`; **nunca** `500` | UNIQUE de `idempotency_key` + mapeo `23505 → 409 DUPLICATED_REQUEST` |
+| Reservas multi-item con productos en común | Sin deadlocks | Items procesados siempre ordenados por `productId` |
+
+```bash
+node scripts/concurrency-lifecycle-test.mjs                    # contra Render
+node scripts/concurrency-lifecycle-test.mjs http://localhost:3006
+```
+
 ---
 
 ## 🌐 Despliegue

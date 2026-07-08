@@ -78,6 +78,14 @@ CREATE INDEX IF NOT EXISTS idx_reservations_order
 CREATE INDEX IF NOT EXISTS idx_reservations_expires
     ON inventario.reservations(expires_at) WHERE status = 'RESERVED';
 
+-- Un pedido no puede tener mas de UNA reserva activa a la vez.
+-- Guarda real contra la carrera de dos POST /inventory/reserve concurrentes
+-- con el mismo orderId y distinta Idempotency-Key: el chequeo en la app es
+-- check-then-insert (no atomico); este indice hace que el INSERT perdedor
+-- falle (23505 -> 409 DUPLICATED_REQUEST) y su transaccion no toque stock.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_reservations_active_order
+    ON inventario.reservations(order_id) WHERE status IN ('RESERVED','CONFIRMED');
+
 -- ======================================================
 -- SEED 1: productos de prueba del mock de Fase 2
 -- (uno con 15 unidades, otro con 1 para la prueba de concurrencia;

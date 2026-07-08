@@ -111,9 +111,16 @@ export class ReservationService {
       }
 
       // --- Descuento atomico por item ---
+      // Los items se procesan SIEMPRE ordenados por productId: dos reservas
+      // concurrentes con productos en comun toman los locks de fila en el
+      // mismo orden, lo que evita deadlocks (espera circular) en Postgres.
+      const orderedItems = [...items].sort((a, b) =>
+        a.productId.localeCompare(b.productId)
+      );
+
       const reservedItems: ReservationItem[] = [];
 
-      for (const item of items) {
+      for (const item of orderedItems) {
 
         // Existencia del producto (para distinguir 404 de 422).
         const exists = await repository.existsInventory(item.productId, client);
@@ -184,7 +191,10 @@ export class ReservationService {
 
     return withTransaction(async (client) => {
 
-      const reservation = await repository.getReservation(orderId, client);
+      // FOR UPDATE: serializa confirmaciones/liberaciones concurrentes del
+      // mismo pedido. La segunda transaccion espera el COMMIT de la primera
+      // y relee el estado ya actualizado (no puede procesar dos veces).
+      const reservation = await repository.getReservationForUpdate(orderId, client);
 
       if (!reservation) {
         throw new ApiError(404, "RESERVATION_NOT_FOUND", "Reservation not found.");
@@ -203,7 +213,12 @@ export class ReservationService {
         );
       }
 
-      for (const item of reservation.items) {
+      // Mismo orden de locks que en la reserva (anti-deadlock).
+      const orderedItems = [...reservation.items].sort((a, b) =>
+        a.productId.localeCompare(b.productId)
+      );
+
+      for (const item of orderedItems) {
         const exists = await repository.existsInventory(item.productId, client);
         if (!exists) {
           throw new ApiError(
@@ -224,7 +239,20 @@ export class ReservationService {
         }
       }
 
-      await repository.updateReservationStatus(reservation.reservationId, "CONFIRMED", client);
+      const transitioned = await repository.updateReservationStatus(
+        reservation.reservationId,
+        "CONFIRMED",
+        client
+      );
+
+      if (!transitioned) {
+        throw new ApiError(
+          409,
+          "RESERVATION_NOT_ACTIVE",
+          `The reservation for order ${orderId} changed state concurrently.`
+        );
+      }
+
       reservation.status = "CONFIRMED";
       reservation.updatedAt = new Date();
 
@@ -245,7 +273,9 @@ export class ReservationService {
 
     return withTransaction(async (client) => {
 
-      const reservation = await repository.getReservation(orderId, client);
+      // FOR UPDATE: ver confirmReservation (serializa confirm/release
+      // concurrentes del mismo pedido).
+      const reservation = await repository.getReservationForUpdate(orderId, client);
 
       if (!reservation) {
         throw new ApiError(404, "RESERVATION_NOT_FOUND", "Reservation not found.");
@@ -264,7 +294,12 @@ export class ReservationService {
         );
       }
 
-      for (const item of reservation.items) {
+      // Mismo orden de locks que en la reserva (anti-deadlock).
+      const orderedItems = [...reservation.items].sort((a, b) =>
+        a.productId.localeCompare(b.productId)
+      );
+
+      for (const item of orderedItems) {
         const exists = await repository.existsInventory(item.productId, client);
         if (!exists) {
           throw new ApiError(
@@ -285,7 +320,20 @@ export class ReservationService {
         }
       }
 
-      await repository.updateReservationStatus(reservation.reservationId, "RELEASED", client);
+      const transitioned = await repository.updateReservationStatus(
+        reservation.reservationId,
+        "RELEASED",
+        client
+      );
+
+      if (!transitioned) {
+        throw new ApiError(
+          409,
+          "RESERVATION_NOT_ACTIVE",
+          `The reservation for order ${orderId} changed state concurrently.`
+        );
+      }
+
       reservation.status = "RELEASED";
       reservation.updatedAt = new Date();
 

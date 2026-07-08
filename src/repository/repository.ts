@@ -299,6 +299,30 @@ class Repository {
       : undefined;
   }
 
+  /**
+   * Igual que getReservation pero con FOR UPDATE (lock pesimista de la fila).
+   * Se usa dentro de las transacciones de confirmar/liberar: dos peticiones
+   * concurrentes sobre el mismo pedido se serializan aqui; la segunda espera
+   * el COMMIT de la primera y relee el estado ya actualizado, por lo que no
+   * puede confirmar Y liberar (o confirmar dos veces) la misma reserva.
+   */
+  async getReservationForUpdate(
+    orderId: string,
+    db: Db
+  ): Promise<Reservation | undefined> {
+    const res = await db.query(
+      `SELECT * FROM ${S}.reservations
+        WHERE order_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+        FOR UPDATE`,
+      [orderId]
+    );
+    return res.rows[0]
+      ? this.mapReservation(res.rows[0], db)
+      : undefined;
+  }
+
   async findReservationByIdempotencyKey(
     idempotencyKey: string,
     db: Db = pool
@@ -349,17 +373,25 @@ class Repository {
     }
   }
 
+  /**
+   * Transicion de estado condicional: solo aplica si la reserva sigue en
+   * el estado esperado (defensa en profundidad ademas del FOR UPDATE).
+   * Devuelve false si otra transaccion ya cambio el estado.
+   */
   async updateReservationStatus(
     reservationId: string,
     status: ReservationStatus,
-    db: Db
-  ): Promise<void> {
-    await db.query(
+    db: Db,
+    expectedStatus: ReservationStatus = "RESERVED"
+  ): Promise<boolean> {
+    const res = await db.query(
       `UPDATE ${S}.reservations
           SET status = $2, updated_at = now()
-        WHERE reservation_id = $1`,
-      [reservationId, status]
+        WHERE reservation_id = $1
+          AND status = $3`,
+      [reservationId, status, expectedStatus]
     );
+    return (res.rowCount ?? 0) > 0;
   }
 
   // ========================================
