@@ -98,6 +98,26 @@ E3 es autocontenido (persistencia + endpoints); la integración real es E4. Esto
 
 El servicio queda disponible en `http://localhost:3006` y la documentación interactiva (Swagger) en `http://localhost:3006/docs`.
 
+### 🖥️ Interfaz de administración (`/admin`)
+
+En `http://localhost:3006/admin` (producción: https://inventario-g7.onrender.com/admin)
+hay una interfaz web autocontenida para operar el inventario:
+
+- **Listado del stock** paginado y filtrable, con los **nombres reales del catálogo
+  de G3** (los sirve el backend en `/admin/catalog-names` con caché de 5 min,
+  porque el catálogo no expone CORS). Resalta stock crítico (≤5) en rojo.
+- **Reponer stock** (`ADD` suma / `SET` fija, con advertencia de que SET resetea
+  el reservado): exige **login real contra G2** (`POST /auth/login`, email +
+  contraseña — sin tokens pegados a mano). Si el rol no es `admin`, la UI lo
+  avisa y el backend responde 403 igualmente.
+- **Sincronizar catálogo** (botón ⇅): ejecuta `POST /inventory/sync-catalog`.
+- Cada operación muestra su **`correlationId`** en el toast de resultado
+  (trazabilidad de punta a punta) y usa `Idempotency-Key` nueva por envío.
+
+La página es un único archivo estático (`public/admin.html`) servido por el mismo
+Express — sin framework ni build extra; usa la API pública del servicio con los
+mismos headers que cualquier otro consumidor.
+
 ---
 
 ## 🔌 Endpoints

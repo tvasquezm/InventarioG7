@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventario · Grupo 7</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --border: #e3e6ea;
+    --text: #1c2733; --muted: #6b7684; --accent: #0b66c3;
+    --ok: #1a7f4b; --warn: #b45309; --err: #b3261e;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); padding: 24px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  header {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    justify-content: space-between; margin-bottom: 18px;
+  }
+  h1 { font-size: 20px; }
+  h1 small { color: var(--muted); font-weight: 400; font-size: 13px; display: block; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px;
+  }
+  /* ---- login ---- */
+  #login-box { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #login-box input {
+    padding: 7px 10px; border: 1px solid var(--border); border-radius: 7px; font: inherit;
+  }
+  .badge {
+    display: inline-block; padding: 2px 9px; border-radius: 99px;
+    font-size: 12px; font-weight: 600;
+  }
+  .badge.admin { background: #e3f2e9; color: var(--ok); }
+  .badge.otro  { background: #fdf0e0; color: var(--warn); }
+  /* ---- toolbar ---- */
+  .toolbar {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 14px 0;
+  }
+  .toolbar input[type=search] {
+    flex: 1; min-width: 180px; padding: 8px 12px;
+    border: 1px solid var(--border); border-radius: 7px; font: inherit;
+  }
+  button {
+    padding: 8px 14px; border: 1px solid var(--border); border-radius: 7px;
+    background: var(--card); font: inherit; cursor: pointer; color: var(--text);
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { opacity: .92; color: #fff; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  /* ---- tabla ---- */
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .uuid { font: 12px/1.4 ui-monospace, monospace; color: var(--muted); }
+  .low  { color: var(--err); font-weight: 700; }
+  .zero { color: var(--muted); }
+  tr.form-row td { background: #f2f7fd; }
+  .stock-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 4px 0; }
+  .stock-form input, .stock-form select {
+    padding: 7px 10px; border: 1px solid var(--border); border-radius: 7px; font: inherit; width: 110px;
+  }
+  .hint { font-size: 12px; color: var(--muted); }
+  /* ---- pie ---- */
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; flex-wrap: wrap; gap: 8px; }
+  #pageinfo { color: var(--muted); font-size: 13px; }
+  /* ---- toasts ---- */
+  #toasts { position: fixed; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 50; }
+  .toast {
+    background: #22303c; color: #fff; border-radius: 8px; padding: 10px 14px;
+    max-width: 420px; font-size: 13px; box-shadow: 0 4px 14px rgba(0,0,0,.25);
+  }
+  .toast.ok  { background: var(--ok); }
+  .toast.err { background: var(--err); }
+  .toast .cid { display: block; opacity: .75; font-size: 11px; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>📦 Inventario — Grupo 7
+      <small>Mini Marketplace Cloud · la verdad del stock</small>
+    </h1>
+    <div class="card" id="login-box">
+      <span id="who" hidden></span>
+      <input id="email" type="email" placeholder="email admin (G2)" autocomplete="username">
+      <input id="pass" type="password" placeholder="contraseña" autocomplete="current-password">
+      <button id="btn-login" class="primary">Entrar</button>
+      <button id="btn-logout" hidden>Salir</button>
+    </div>
+  </header>
+
+  <div class="card">
+    <div class="toolbar">
+      <input id="q" type="search" placeholder="Filtrar por nombre o productId…">
+      <button id="btn-refresh">↻ Actualizar</button>
+      <button id="btn-sync" title="Trae del catálogo de G3 los productos que falten en inventario">⇅ Sincronizar catálogo (G3)</button>
+    </div>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Producto</th>
+            <th class="num">Disponible</th>
+            <th class="num">Reservado</th>
+            <th class="num">Total</th>
+            <th class="num">Vendible</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr><td colspan="6" class="hint">Cargando inventario…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="foot">
+      <span id="pageinfo"></span>
+      <span>
+        <button id="btn-prev">← Anterior</button>
+        <button id="btn-next">Siguiente →</button>
+      </span>
+    </div>
+  </div>
+
+  <p class="hint" style="margin-top:10px">
+    Reponer stock exige rol <b>admin</b> validado contra el Identity Service (G2).
+    <b>ADD</b> suma unidades al disponible; <b>SET</b> fija el total y
+    <u>pone el reservado en 0</u> (usar solo para resets controlados).
+    Cada operación publica <code>StockChanged</code> al bus del curso.
+  </p>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+"use strict";
+const AUTH_URL = "https://auth-minimarket-cloud.onrender.com";
+const CONSUMER = "inventory-admin-ui";
+const state = { page: 1, size: 20, totalPages: 1, names: {}, rows: [], openForm: null };
+const $ = (id) => document.getElementById(id);
+
+/* ---------- helpers ---------- */
+function toast(msg, kind, correlationId) {
+  const el = document.createElement("div");
+  el.className = "toast " + (kind || "");
+  el.textContent = msg;
+  if (correlationId) {
+    const c = document.createElement("span");
+    c.className = "cid"; c.textContent = "correlationId: " + correlationId;
+    el.appendChild(c);
+  }
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 6000);
+}
+function headers(extra) {
+  return Object.assign({
+    "X-Consumer": CONSUMER,
+    "X-Correlation-Id": "ui-" + crypto.randomUUID()
+  }, extra || {});
+}
+function session() {
+  try { return JSON.parse(sessionStorage.getItem("g7session")) || null; }
+  catch { return null; }
+}
+
+/* ---------- login (G2) ---------- */
+function paintLogin() {
+  const s = session();
+  const logged = !!s;
+  $("email").hidden = logged; $("pass").hidden = logged;
+  $("btn-login").hidden = logged; $("btn-logout").hidden = !logged;
+  $("who").hidden = !logged;
+  if (logged) {
+    $("who").innerHTML = s.email + " " +
+      '<span class="badge ' + (s.role === "admin" ? "admin" : "otro") + '">' + s.role + "</span>";
+  }
+}
+async function login() {
+  const email = $("email").value.trim(), password = $("pass").value;
+  if (!email || !password) return toast("Ingresa email y contraseña", "err");
+  $("btn-login").disabled = true;
+  try {
+    const r = await fetch(AUTH_URL + "/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password })
+    });
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.message || "Credenciales inválidas");
+    sessionStorage.setItem("g7session", JSON.stringify({
+      token: body.access_token,
+      email: body.user?.email || email,
+      role: body.user?.role || "?"
+    }));
+    paintLogin();
+    const role = body.user?.role;
+    toast(role === "admin"
+      ? "Sesión iniciada como admin (G2)"
+      : "Sesión iniciada, pero tu rol es '" + role + "': la reposición será rechazada (403)",
+      role === "admin" ? "ok" : "err");
+  } catch (e) {
+    toast("Login G2: " + e.message, "err");
+  } finally {
+    $("btn-login").disabled = false; $("pass").value = "";
+  }
+}
+
+/* ---------- datos ---------- */
+async function loadNames() {
+  try {
+    const r = await fetch("/admin/catalog-names", { headers: headers() });
+    if (r.ok) state.names = await r.json();
+  } catch { /* sin nombres: se muestran UUIDs */ }
+}
+async function loadInventory() {
+  $("rows").innerHTML = '<tr><td colspan="6" class="hint">Cargando…</td></tr>';
+  try {
+    const r = await fetch("/inventory?page=" + state.page + "&size=" + state.size, { headers: headers() });
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.message || r.status);
+    state.rows = body.data;
+    state.totalPages = body.pagination.totalPages || 1;
+    $("pageinfo").textContent =
+      "Página " + body.pagination.page + " de " + state.totalPages +
+      " · " + body.pagination.total + " productos";
+    render();
+  } catch (e) {
+    $("rows").innerHTML = '<tr><td colspan="6" class="hint">Error cargando inventario: ' + e.message + "</td></tr>";
+  }
+}
+
+/* ---------- render ---------- */
+function stockCell(n, cls) {
+  const extra = n === 0 ? " zero" : (n <= 5 ? " low" : "");
+  return '<td class="num' + (cls || "") + extra + '">' + n + "</td>";
+}
+function render() {
+  const q = $("q").value.trim().toLowerCase();
+  const rows = state.rows.filter(it => {
+    if (!q) return true;
+    const name = (state.names[it.productId] || "").toLowerCase();
+    return name.includes(q) || it.productId.toLowerCase().includes(q);
+  });
+  if (!rows.length) {
+    $("rows").innerHTML = '<tr><td colspan="6" class="hint">Sin resultados.</td></tr>';
+    return;
+  }
+  $("rows").innerHTML = rows.map(it => {
+    const name = state.names[it.productId];
+    const label = name
+      ? name + '<br><span class="uuid">' + it.productId + "</span>"
+      : '<span class="uuid">' + it.productId + "</span>";
+    let html =
+      "<tr>" +
+      "<td>" + label + "</td>" +
+      stockCell(it.availableStock) + stockCell(it.reservedStock) +
+      stockCell(it.totalStock) + stockCell(it.virtualStock) +
+      '<td><button data-open="' + it.productId + '">Reponer</button></td>' +
+      "</tr>";
+    if (state.openForm === it.productId) {
+      html +=
+        '<tr class="form-row"><td colspan="6"><div class="stock-form">' +
+        '<input id="qty" type="number" min="0" step="1" placeholder="cantidad" value="10">' +
+        '<select id="op"><option value="ADD">ADD (sumar)</option><option value="SET">SET (fijar)</option></select>' +
+        '<button class="primary" data-apply="' + it.productId + '">Aplicar</button>' +
+        '<button data-cancel="1">Cancelar</button>' +
+        '<span class="hint">requiere sesión admin (G2) · operación idempotente</span>' +
+        "</div></td></tr>";
+    }
+    return html;
+  }).join("");
+}
+
+/* ---------- reponer stock ---------- */
+async function applyStock(productId) {
+  const s = session();
+  if (!s) return toast("Inicia sesión con una cuenta admin de G2 primero", "err");
+  const qty = Number($("qty").value);
+  const op = $("op").value;
+  if (!Number.isInteger(qty) || qty < 0) return toast("Cantidad inválida", "err");
+  if (op === "SET" && !confirm("SET fija el total en " + qty + " y pone el reservado en 0.\n¿Continuar?")) return;
+
+  const h = headers({
+    "Content-Type": "application/json",
+    "Authorization": "Bearer " + s.token,
+    "Idempotency-Key": crypto.randomUUID()
+  });
+  try {
+    const r = await fetch("/inventory/" + productId + "/stock", {
+      method: "POST", headers: h,
+      body: JSON.stringify({ quantity: qty, operation: op })
+    });
+    const body = await r.json();
+    if (!r.ok) {
+      if (r.status === 401) sessionStorage.removeItem("g7session"), paintLogin();
+      throw Object.assign(new Error(body.message || r.status), { cid: body.correlationId });
+    }
+    toast("Stock actualizado: disponible " + body.availableStock +
+          " (evento StockChanged publicado)", "ok", h["X-Correlation-Id"]);
+    state.openForm = null;
+    loadInventory();
+  } catch (e) {
+    toast("No se pudo actualizar: " + e.message, "err", e.cid);
+  }
+}
+
+/* ---------- sync catálogo ---------- */
+async function syncCatalog() {
+  $("btn-sync").disabled = true;
+  const h = headers();
+  try {
+    const r = await fetch("/inventory/sync-catalog", { method: "POST", headers: h });
+    const body = await r.json();
+    if (!r.ok) throw Object.assign(new Error(body.message || r.status), { cid: body.correlationId });
+    toast("Catálogo G3: " + body.catalogProducts + " productos · " +
+          body.created + " nuevos · " + body.alreadyTracked + " ya existentes", "ok", h["X-Correlation-Id"]);
+    await loadNames();
+    loadInventory();
+  } catch (e) {
+    toast("Sync catálogo: " + e.message, "err", e.cid);
+  } finally {
+    $("btn-sync").disabled = false;
+  }
+}
+
+/* ---------- eventos ---------- */
+document.addEventListener("click", (ev) => {
+  const t = ev.target;
+  if (t.dataset.open)  { state.openForm = state.openForm === t.dataset.open ? null : t.dataset.open; render(); }
+  if (t.dataset.apply) applyStock(t.dataset.apply);
+  if (t.dataset.cancel){ state.openForm = null; render(); }
+});
+$("btn-login").addEventListener("click", login);
+$("pass").addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
+$("btn-logout").addEventListener("click", () => { sessionStorage.removeItem("g7session"); paintLogin(); });
+$("btn-refresh").addEventListener("click", loadInventory);
+$("btn-sync").addEventListener("click", syncCatalog);
+$("q").addEventListener("input", render);
+$("btn-prev").addEventListener("click", () => { if (state.page > 1) { state.page--; loadInventory(); } });
+$("btn-next").addEventListener("click", () => { if (state.page < state.totalPages) { state.page++; loadInventory(); } });
+
+/* ---------- arranque ---------- */
+paintLogin();
+loadNames().then(loadInventory);
+</script>
+</body>
+</html>
