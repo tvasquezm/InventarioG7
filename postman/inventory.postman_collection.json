@@ -1,267 +1,692 @@
 {
-  "info": {
-    "_postman_id": "a7c7bd7d-74d7-4bc3-bf9c-2b5d4481b7a7",
-    "name": "E2 - Inventory Service Mock (Grupo 7)",
-    "description": "Colección de pruebas automáticas para la Fase 2 del Servicio de Inventario. Valida headers obligatorios, el flujo de reserva/rechazo/confirmación y la idempotencia. Cada request tiene tests (pm.test) que afirman el resultado esperado: correr la colección completa y en orden con 'Run collection'. NOTA: la concurrencia real (Race Condition por la última unidad) NO se prueba aquí porque Postman ejecuta los requests en secuencia; para eso usar el script 'scripts/concurrency-test.mjs', que dispara reservas en paralelo.",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+ "info": {
+  "_postman_id": "a7c7bd7d-74d7-4bc3-bf9c-2b5d4481b7a7",
+  "name": "E4 - Inventory Service (Grupo 7)",
+  "description": "Coleccion de pruebas de integracion del Inventory Service (E4).\nCorrer SECUENCIALMENTE (Collection Runner). Cubre casos exitosos y fallidos:\nlogin admin real contra G2, lecturas publicas, carga de stock protegida (401/200),\nsincronizacion del catalogo de G3, y el caso critico de concurrencia\n(ultima unidad: 201 + 422) con confirmacion final.\nLos orderId son dinamicos: la coleccion es re-ejecutable sin limpiar la BD.",
+  "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+ },
+ "item": [
+  {
+   "name": "0. Login Admin (G2 Identity Service)",
+   "event": [
+    {
+     "listen": "test",
+     "script": {
+      "type": "text/javascript",
+      "exec": [
+       "pm.test('Login OK (200)', () => pm.response.to.have.status(200));",
+       "const body = pm.response.json();",
+       "pm.test('El usuario tiene rol admin', () => pm.expect(body.user.role).to.eql('admin'));",
+       "pm.collectionVariables.set('access_token', body.access_token);",
+       "// orderId dinamico: la coleccion es re-ejecutable sin limpiar la BD",
+       "pm.collectionVariables.set('demoOrderId', 'ORD-PM-' + Date.now());"
+      ]
+     }
+    }
+   ],
+   "request": {
+    "method": "POST",
+    "header": [
+     {
+      "key": "Content-Type",
+      "value": "application/json",
+      "type": "text"
+     },
+     {
+      "key": "X-Consumer",
+      "value": "postman-test-client",
+      "type": "text"
+     }
+    ],
+    "url": {
+     "raw": "{{authUrl}}/auth/login",
+     "host": [
+      "{{authUrl}}"
+     ],
+     "path": [
+      "auth",
+      "login"
+     ]
+    },
+    "body": {
+     "mode": "raw",
+     "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+     "options": {
+      "raw": {
+       "language": "json"
+      }
+     }
+    }
+   }
   },
-  "item": [
+  {
+   "name": "1. Listar Inventario Completo",
+   "event": [
     {
-      "name": "1. Listar Inventario Completo",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('Responde 200 OK', () => pm.response.to.have.status(200));",
-              "pm.test('Devuelve lista paginada (data + pagination)', () => {",
-              "  const body = pm.response.json();",
-              "  pm.expect(body).to.have.property('data').that.is.an('array');",
-              "  pm.expect(body).to.have.property('pagination');",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [
-          { "key": "X-Request-Id", "value": "{{$guid}}", "type": "text" },
-          { "key": "X-Correlation-Id", "value": "{{$guid}}", "type": "text" },
-          { "key": "X-Consumer", "value": "postman-test-client", "type": "text" }
-        ],
-        "url": {
-          "raw": "{{baseUrl}}/inventory?page=1&size=10",
-          "host": ["{{baseUrl}}"],
-          "path": ["inventory"],
-          "query": [
-            { "key": "page", "value": "1" },
-            { "key": "size", "value": "10" }
-          ]
-        }
-      }
-    },
-    {
-      "name": "2. Error - Falta Header Obligatorio X-Consumer",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('Rechaza la peticion sin X-Consumer (400)', () => pm.response.to.have.status(400));",
-              "pm.test('El codigo de error es INVALID_REQUEST', () => {",
-              "  pm.expect(pm.response.json().code).to.eql('INVALID_REQUEST');",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [
-          { "key": "X-Request-Id", "value": "{{$guid}}", "type": "text" },
-          { "key": "X-Correlation-Id", "value": "{{$guid}}", "type": "text" }
-        ],
-        "url": {
-          "raw": "{{baseUrl}}/inventory",
-          "host": ["{{baseUrl}}"],
-          "path": ["inventory"]
-        }
-      }
-    },
-    {
-      "name": "3. Obtener Stock de Producto Específico",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('Responde 200 OK', () => pm.response.to.have.status(200));",
-              "pm.test('Expone los campos de stock (incluye virtualStock)', () => {",
-              "  const body = pm.response.json();",
-              "  pm.expect(body).to.have.property('availableStock');",
-              "  pm.expect(body).to.have.property('reservedStock');",
-              "  pm.expect(body).to.have.property('totalStock');",
-              "  pm.expect(body).to.have.property('virtualStock');",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "GET",
-        "header": [
-          { "key": "X-Request-Id", "value": "{{$guid}}", "type": "text" },
-          { "key": "X-Correlation-Id", "value": "{{$guid}}", "type": "text" },
-          { "key": "X-Consumer", "value": "postman-test-client", "type": "text" }
-        ],
-        "url": {
-          "raw": "{{baseUrl}}/inventory/550e8400-e29b-41d4-a716-446655440000",
-          "host": ["{{baseUrl}}"],
-          "path": ["inventory", "550e8400-e29b-41d4-a716-446655440000"]
-        }
-      }
-    },
-    {
-      "name": "4. Reabastecer/Modificar Stock (Idempotente)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('Responde 200 OK (aplica o reusa la operacion idempotente)', () => pm.response.to.have.status(200));",
-              "pm.test('Devuelve el inventario actualizado', () => {",
-              "  pm.expect(pm.response.json()).to.have.property('availableStock');",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "X-Request-Id", "value": "{{$guid}}", "type": "text" },
-          { "key": "X-Correlation-Id", "value": "{{$guid}}", "type": "text" },
-          { "key": "X-Consumer", "value": "postman-test-client", "type": "text" },
-          { "key": "Idempotency-Key", "value": "b5db0c7e-89a1-43ee-bc22-3cd2240974fa", "type": "text" }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"quantity\": 5,\n  \"operation\": \"ADD\"\n}",
-          "options": { "raw": { "language": "json" } }
-        },
-        "url": {
-          "raw": "{{baseUrl}}/inventory/550e8400-e29b-41d4-a716-446655440000/stock",
-          "host": ["{{baseUrl}}"],
-          "path": ["inventory", "550e8400-e29b-41d4-a716-446655440000", "stock"]
-        }
-      }
-    },
-    {
-      "name": "5. Reservar Stock - Última Unidad (Éxito 201)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "// 201 en una corrida fresca; 200 si se reejecuta (replay idempotente sobre el mismo estado en memoria).",
-              "pm.test('Pedido A obtiene la reserva (201 nueva / 200 replay)', () => {",
-              "  pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
-              "});",
-              "pm.test('La reserva pertenece a ORD-CRITICO-01', () => {",
-              "  pm.expect(pm.response.json().orderId).to.eql('ORD-CRITICO-01');",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "X-Request-Id", "value": "{{$guid}}", "type": "text" },
-          { "key": "X-Correlation-Id", "value": "{{$guid}}", "type": "text" },
-          { "key": "X-Consumer", "value": "order-service", "type": "text" },
-          { "key": "Idempotency-Key", "value": "fa1a2b2c-3d3e-4f4f-8a8b-9c9d9e9f0001", "type": "text" }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"orderId\": \"ORD-CRITICO-01\",\n  \"items\": [\n    {\n      \"productId\": \"660e8400-e29b-41d4-a716-446655440111\",\n      \"quantity\": 1\n    }\n  ]\n}",
-          "options": { "raw": { "language": "json" } }
-        },
-        "url": {
-          "raw": "{{baseUrl}}/inventory/reserve",
-          "host": ["{{baseUrl}}"],
-          "path": ["inventory", "reserve"]
-        }
-      }
-    },
-    {
-      "name": "6. Reservar Stock - Sin Disponibilidad (Rechazo 422)",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('Pedido B es rechazado por falta de stock (422)', () => pm.response.to.have.status(422));",
-              "pm.test('El codigo de error es OUT_OF_STOCK', () => {",
-              "  pm.expect(pm.response.json().code).to.eql('OUT_OF_STOCK');",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "X-Request-Id", "value": "{{$guid}}", "type": "text" },
-          { "key": "X-Correlation-Id", "value": "{{$guid}}", "type": "text" },
-          { "key": "X-Consumer", "value": "order-service", "type": "text" },
-          { "key": "Idempotency-Key", "value": "fa1a2b2c-3d3e-4f4f-8a8b-9c9d9e9f0002", "type": "text" }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"orderId\": \"ORD-CRITICO-02\",\n  \"items\": [\n    {\n      \"productId\": \"660e8400-e29b-41d4-a716-446655440111\",\n      \"quantity\": 1\n    }\n  ]\n}",
-          "options": { "raw": { "language": "json" } }
-        },
-        "url": {
-          "raw": "{{baseUrl}}/inventory/reserve",
-          "host": ["{{baseUrl}}"],
-          "path": ["inventory", "reserve"]
-        }
-      }
-    },
-    {
-      "name": "7. Confirmar Pago de Reserva de Pedido A",
-      "event": [
-        {
-          "listen": "test",
-          "script": {
-            "type": "text/javascript",
-            "exec": [
-              "pm.test('Responde 200 OK', () => pm.response.to.have.status(200));",
-              "pm.test('La reserva queda CONFIRMED', () => {",
-              "  pm.expect(pm.response.json().status).to.eql('CONFIRMED');",
-              "});"
-            ]
-          }
-        }
-      ],
-      "request": {
-        "method": "POST",
-        "header": [
-          { "key": "X-Request-Id", "value": "{{$guid}}", "type": "text" },
-          { "key": "X-Correlation-Id", "value": "{{$guid}}", "type": "text" },
-          { "key": "X-Consumer", "value": "payment-service", "type": "text" }
-        ],
-        "body": {
-          "mode": "raw",
-          "raw": "{\n  \"orderId\": \"ORD-CRITICO-01\"\n}",
-          "options": { "raw": { "language": "json" } }
-        },
-        "url": {
-          "raw": "{{baseUrl}}/inventory/confirm",
-          "host": ["{{baseUrl}}"],
-          "path": ["inventory", "confirm"]
-        }
-      }
+     "listen": "test",
+     "script": {
+      "type": "text/javascript",
+      "exec": [
+       "pm.test('Responde 200 OK', () => pm.response.to.have.status(200));",
+       "pm.test('Devuelve lista paginada (data + pagination)', () => {",
+       "  const body = pm.response.json();",
+       "  pm.expect(body).to.have.property('data').that.is.an('array');",
+       "  pm.expect(body).to.have.property('pagination');",
+       "});"
+      ]
+     }
     }
-  ],
-  "variable": [
-    {
-      "key": "baseUrl",
-      "value": "https://inventario-g7.onrender.com",
-      "type": "string"
-    },
-    {
-      "key": "baseUrlLocal",
-      "value": "http://localhost:3006",
-      "type": "string"
+   ],
+   "request": {
+    "method": "GET",
+    "header": [
+     {
+      "key": "X-Request-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Correlation-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Consumer",
+      "value": "postman-test-client",
+      "type": "text"
+     }
+    ],
+    "url": {
+     "raw": "{{baseUrl}}/inventory?page=1&size=10",
+     "host": [
+      "{{baseUrl}}"
+     ],
+     "path": [
+      "inventory"
+     ],
+     "query": [
+      {
+       "key": "page",
+       "value": "1"
+      },
+      {
+       "key": "size",
+       "value": "10"
+      }
+     ]
     }
-  ]
+   }
+  },
+  {
+   "name": "2. Error - Falta Header Obligatorio X-Consumer",
+   "event": [
+    {
+     "listen": "test",
+     "script": {
+      "type": "text/javascript",
+      "exec": [
+       "pm.test('Rechaza la peticion sin X-Consumer (400)', () => pm.response.to.have.status(400));",
+       "pm.test('El codigo de error es INVALID_REQUEST', () => {",
+       "  pm.expect(pm.response.json().code).to.eql('INVALID_REQUEST');",
+       "});"
+      ]
+     }
+    }
+   ],
+   "request": {
+    "method": "GET",
+    "header": [
+     {
+      "key": "X-Request-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Correlation-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     }
+    ],
+    "url": {
+     "raw": "{{baseUrl}}/inventory",
+     "host": [
+      "{{baseUrl}}"
+     ],
+     "path": [
+      "inventory"
+     ]
+    }
+   }
+  },
+  {
+   "name": "3. Obtener Stock de Producto Específico",
+   "event": [
+    {
+     "listen": "test",
+     "script": {
+      "type": "text/javascript",
+      "exec": [
+       "pm.test('Responde 200 OK', () => pm.response.to.have.status(200));",
+       "pm.test('Expone los campos de stock (incluye virtualStock)', () => {",
+       "  const body = pm.response.json();",
+       "  pm.expect(body).to.have.property('availableStock');",
+       "  pm.expect(body).to.have.property('reservedStock');",
+       "  pm.expect(body).to.have.property('totalStock');",
+       "  pm.expect(body).to.have.property('virtualStock');",
+       "});"
+      ]
+     }
+    }
+   ],
+   "request": {
+    "method": "GET",
+    "header": [
+     {
+      "key": "X-Request-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Correlation-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Consumer",
+      "value": "postman-test-client",
+      "type": "text"
+     }
+    ],
+    "url": {
+     "raw": "{{baseUrl}}/inventory/550e8400-e29b-41d4-a716-446655440000",
+     "host": [
+      "{{baseUrl}}"
+     ],
+     "path": [
+      "inventory",
+      "550e8400-e29b-41d4-a716-446655440000"
+     ]
+    }
+   }
+  },
+  {
+   "name": "4. Reabastecer SIN token (401 - protegido por G2)",
+   "event": [
+    {
+     "listen": "test",
+     "script": {
+      "type": "text/javascript",
+      "exec": [
+       "pm.test('Rechazado sin token (401)', () => pm.response.to.have.status(401));",
+       "pm.test('Codigo UNAUTHORIZED', () => pm.expect(pm.response.json().code).to.eql('UNAUTHORIZED'));"
+      ]
+     }
+    }
+   ],
+   "request": {
+    "method": "POST",
+    "header": [
+     {
+      "key": "X-Request-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Correlation-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Consumer",
+      "value": "postman-test-client",
+      "type": "text"
+     },
+     {
+      "key": "Content-Type",
+      "value": "application/json",
+      "type": "text"
+     },
+     {
+      "key": "Idempotency-Key",
+      "value": "{{$guid}}",
+      "type": "text"
+     }
+    ],
+    "url": {
+     "raw": "{{baseUrl}}/inventory/550e8400-e29b-41d4-a716-446655440000/stock",
+     "host": [
+      "{{baseUrl}}"
+     ],
+     "path": [
+      "inventory",
+      "550e8400-e29b-41d4-a716-446655440000",
+      "stock"
+     ]
+    },
+    "body": {
+     "mode": "raw",
+     "raw": "{\n  \"quantity\": 5,\n  \"operation\": \"ADD\"\n}",
+     "options": {
+      "raw": {
+       "language": "json"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "5. Reabastecer con token admin (200 + evento StockChanged)",
+   "event": [
+    {
+     "listen": "test",
+     "script": {
+      "type": "text/javascript",
+      "exec": [
+       "pm.test('Reposicion aplicada (200)', () => pm.response.to.have.status(200));",
+       "pm.test('Devuelve el inventario actualizado', () => pm.expect(pm.response.json()).to.have.property('availableStock'));"
+      ]
+     }
+    }
+   ],
+   "request": {
+    "method": "POST",
+    "header": [
+     {
+      "key": "X-Request-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Correlation-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Consumer",
+      "value": "postman-test-client",
+      "type": "text"
+     },
+     {
+      "key": "Content-Type",
+      "value": "application/json",
+      "type": "text"
+     },
+     {
+      "key": "Idempotency-Key",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "Authorization",
+      "value": "Bearer {{access_token}}",
+      "type": "text"
+     }
+    ],
+    "url": {
+     "raw": "{{baseUrl}}/inventory/550e8400-e29b-41d4-a716-446655440000/stock",
+     "host": [
+      "{{baseUrl}}"
+     ],
+     "path": [
+      "inventory",
+      "550e8400-e29b-41d4-a716-446655440000",
+      "stock"
+     ]
+    },
+    "body": {
+     "mode": "raw",
+     "raw": "{\n  \"quantity\": 5,\n  \"operation\": \"ADD\"\n}",
+     "options": {
+      "raw": {
+       "language": "json"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "6. Sincronizar catalogo (G3) - idempotente",
+   "event": [
+    {
+     "listen": "test",
+     "script": {
+      "type": "text/javascript",
+      "exec": [
+       "pm.test('Sincronizacion OK (200)', () => pm.response.to.have.status(200));",
+       "const body = pm.response.json();",
+       "pm.test('Leyo el catalogo de G3', () => pm.expect(body.catalogProducts).to.be.above(0));",
+       "pm.test('Idempotente: no duplica productos ya inventariados', () => {",
+       "  pm.expect(body.created + body.alreadyTracked + body.skippedInactive).to.eql(body.catalogProducts);",
+       "});"
+      ]
+     }
+    }
+   ],
+   "request": {
+    "method": "POST",
+    "header": [
+     {
+      "key": "X-Request-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Correlation-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Consumer",
+      "value": "postman-test-client",
+      "type": "text"
+     }
+    ],
+    "url": {
+     "raw": "{{baseUrl}}/inventory/sync-catalog",
+     "host": [
+      "{{baseUrl}}"
+     ],
+     "path": [
+      "inventory",
+      "sync-catalog"
+     ]
+    }
+   }
+  },
+  {
+   "name": "7. Preparar caso critico: SET stock=1 (admin)",
+   "event": [
+    {
+     "listen": "test",
+     "script": {
+      "type": "text/javascript",
+      "exec": [
+       "pm.test('Producto demo queda con 1 unidad', () => {",
+       "  pm.response.to.have.status(200);",
+       "  pm.expect(pm.response.json().availableStock).to.eql(1);",
+       "});"
+      ]
+     }
+    }
+   ],
+   "request": {
+    "method": "POST",
+    "header": [
+     {
+      "key": "X-Request-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Correlation-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Consumer",
+      "value": "postman-test-client",
+      "type": "text"
+     },
+     {
+      "key": "Content-Type",
+      "value": "application/json",
+      "type": "text"
+     },
+     {
+      "key": "Idempotency-Key",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "Authorization",
+      "value": "Bearer {{access_token}}",
+      "type": "text"
+     }
+    ],
+    "url": {
+     "raw": "{{baseUrl}}/inventory/660e8400-e29b-41d4-a716-446655440111/stock",
+     "host": [
+      "{{baseUrl}}"
+     ],
+     "path": [
+      "inventory",
+      "660e8400-e29b-41d4-a716-446655440111",
+      "stock"
+     ]
+    },
+    "body": {
+     "mode": "raw",
+     "raw": "{\n  \"quantity\": 1,\n  \"operation\": \"SET\"\n}",
+     "options": {
+      "raw": {
+       "language": "json"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "8. Reservar la ultima unidad (201) - con userId v1.6",
+   "event": [
+    {
+     "listen": "test",
+     "script": {
+      "type": "text/javascript",
+      "exec": [
+       "pm.test('Reserva creada (201)', () => pm.response.to.have.status(201));",
+       "const body = pm.response.json();",
+       "pm.test('Estado RESERVED y sin stock restante', () => {",
+       "  pm.expect(body.status).to.eql('RESERVED');",
+       "  pm.expect(body.items[0].availableStock).to.eql(0);",
+       "});"
+      ]
+     }
+    }
+   ],
+   "request": {
+    "method": "POST",
+    "header": [
+     {
+      "key": "X-Request-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Correlation-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Consumer",
+      "value": "postman-test-client",
+      "type": "text"
+     },
+     {
+      "key": "Content-Type",
+      "value": "application/json",
+      "type": "text"
+     },
+     {
+      "key": "Idempotency-Key",
+      "value": "{{$guid}}",
+      "type": "text"
+     }
+    ],
+    "url": {
+     "raw": "{{baseUrl}}/inventory/reserve",
+     "host": [
+      "{{baseUrl}}"
+     ],
+     "path": [
+      "inventory",
+      "reserve"
+     ]
+    },
+    "body": {
+     "mode": "raw",
+     "raw": "{\n  \"orderId\": \"{{demoOrderId}}\",\n  \"userId\": \"USR-01\",\n  \"items\": [\n    { \"productId\": \"660e8400-e29b-41d4-a716-446655440111\", \"quantity\": 1 }\n  ]\n}",
+     "options": {
+      "raw": {
+       "language": "json"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "9. Reservar sin stock (422 OUT_OF_STOCK + evento StockRejected)",
+   "event": [
+    {
+     "listen": "test",
+     "script": {
+      "type": "text/javascript",
+      "exec": [
+       "pm.test('Rechazado por falta de stock (422)', () => pm.response.to.have.status(422));",
+       "pm.test('Codigo OUT_OF_STOCK', () => pm.expect(pm.response.json().code).to.eql('OUT_OF_STOCK'));"
+      ]
+     }
+    }
+   ],
+   "request": {
+    "method": "POST",
+    "header": [
+     {
+      "key": "X-Request-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Correlation-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Consumer",
+      "value": "postman-test-client",
+      "type": "text"
+     },
+     {
+      "key": "Content-Type",
+      "value": "application/json",
+      "type": "text"
+     },
+     {
+      "key": "Idempotency-Key",
+      "value": "{{$guid}}",
+      "type": "text"
+     }
+    ],
+    "url": {
+     "raw": "{{baseUrl}}/inventory/reserve",
+     "host": [
+      "{{baseUrl}}"
+     ],
+     "path": [
+      "inventory",
+      "reserve"
+     ]
+    },
+    "body": {
+     "mode": "raw",
+     "raw": "{\n  \"orderId\": \"{{demoOrderId}}-B\",\n  \"userId\": \"USR-02\",\n  \"items\": [\n    { \"productId\": \"660e8400-e29b-41d4-a716-446655440111\", \"quantity\": 1 }\n  ]\n}",
+     "options": {
+      "raw": {
+       "language": "json"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "10. Confirmar la reserva (200 CONFIRMED + evento StockConfirmed)",
+   "event": [
+    {
+     "listen": "test",
+     "script": {
+      "type": "text/javascript",
+      "exec": [
+       "pm.test('Confirmada (200)', () => pm.response.to.have.status(200));",
+       "pm.test('Estado CONFIRMED', () => pm.expect(pm.response.json().status).to.eql('CONFIRMED'));"
+      ]
+     }
+    }
+   ],
+   "request": {
+    "method": "POST",
+    "header": [
+     {
+      "key": "X-Request-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Correlation-Id",
+      "value": "{{$guid}}",
+      "type": "text"
+     },
+     {
+      "key": "X-Consumer",
+      "value": "postman-test-client",
+      "type": "text"
+     },
+     {
+      "key": "Content-Type",
+      "value": "application/json",
+      "type": "text"
+     }
+    ],
+    "url": {
+     "raw": "{{baseUrl}}/inventory/confirm",
+     "host": [
+      "{{baseUrl}}"
+     ],
+     "path": [
+      "inventory",
+      "confirm"
+     ]
+    },
+    "body": {
+     "mode": "raw",
+     "raw": "{\n  \"orderId\": \"{{demoOrderId}}\"\n}",
+     "options": {
+      "raw": {
+       "language": "json"
+      }
+     }
+    }
+   }
+  }
+ ],
+ "variable": [
+  {
+   "key": "baseUrl",
+   "value": "https://inventario-g7.onrender.com",
+   "type": "string"
+  },
+  {
+   "key": "baseUrlLocal",
+   "value": "http://localhost:3006",
+   "type": "string"
+  },
+  {
+   "key": "authUrl",
+   "value": "https://auth-minimarket-cloud.onrender.com"
+  },
+  {
+   "key": "adminEmail",
+   "value": "maria@correo.cl"
+  },
+  {
+   "key": "adminPassword",
+   "value": "AdminClave123"
+  },
+  {
+   "key": "access_token",
+   "value": ""
+  },
+  {
+   "key": "demoOrderId",
+   "value": ""
+  }
+ ]
 }
