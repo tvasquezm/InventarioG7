@@ -4,7 +4,7 @@
 // ======================================================
 //
 // Se suscribe a payment.approved / payment.rejected en el exchange
-// compartido (payments.events) con cola propia durable
+// compartido (fishmarket) con cola propia durable
 // (g7-inventory-service, definida por G7 segun acuerdo con G5):
 //
 //   payment.approved -> confirmar la reserva del pedido (stock sale definitivo)
@@ -30,7 +30,7 @@ import { reservationService } from "../domain/reservations";
 import { ApiError } from "../middlewares/error.middleware";
 
 const RABBITMQ_URL = process.env.RABBITMQ_URL;
-const EXCHANGE = process.env.RABBITMQ_EXCHANGE || "payments.events";
+const EXCHANGE = process.env.RABBITMQ_EXCHANGE || "fishmarket";
 const QUEUE = process.env.RABBITMQ_QUEUE || "g7-inventory-service";
 const ROUTING_KEYS = ["payment.approved", "payment.rejected", "OrderCreated"];
 const RECONNECT_MS = 5000;

@@ -5,8 +5,9 @@
 //
 // Cada DISPATCH_INTERVAL_MS toma un lote de eventos pendientes del
 // outbox (FOR UPDATE SKIP LOCKED: seguro con varias instancias) y los
-// publica al exchange topic compartido del curso (payments.events en
-// CloudAMQP; el mismo que usan G5 y G6). Routing key = eventType.
+// publica al exchange topic compartido del curso (fishmarket, en el
+// RabbitMQ de Railway administrado por G5; antes payments.events en
+// CloudAMQP, migrado al expirar su trial). Routing key = eventType.
 //
 // Entrega "al menos una vez": si el proceso muere entre publicar y
 // marcar published_at, el evento se re-publica en el siguiente ciclo
@@ -17,7 +18,7 @@ import { withTransaction } from "../config/database";
 import { repository } from "../repository/repository";
 
 const RABBITMQ_URL = process.env.RABBITMQ_URL;
-const EXCHANGE = process.env.RABBITMQ_EXCHANGE || "payments.events";
+const EXCHANGE = process.env.RABBITMQ_EXCHANGE || "fishmarket";
 const DISPATCH_INTERVAL_MS = Number(process.env.OUTBOX_INTERVAL_MS || 5000);
 const BATCH_SIZE = 20;
 

@@ -7,7 +7,7 @@
 // Fase 4: patron OUTBOX. Cada metodo inserta el evento en
 // inventario.outbox_events DENTRO de la transaccion que cambia el
 // stock; el dispatcher (events/dispatcher.ts) lo publica despues a
-// RabbitMQ (CloudAMQP, exchange payments.events) y marca published_at.
+// RabbitMQ (exchange compartido 'fishmarket') y marca published_at.
 //
 // Por que: si el evento se publicara directo dentro de la transaccion
 // y el COMMIT fallara, el ecosistema recibiria un evento de algo que
