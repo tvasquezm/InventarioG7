@@ -169,6 +169,31 @@ Configuración: `RABBITMQ_URL` (ver `.env.example`; en Render se define en el
 dashboard). Sin la variable, el servicio funciona igual y los eventos quedan
 encolados en el outbox hasta que haya broker.
 
+### Consumo de eventos de pago (G6) — Fase 4
+
+El servicio consume `payment.approved` y `payment.rejected` desde su **cola propia
+durable `g7-inventory-service`** (acumula eventos aunque Render duerma el servicio)
+en el mismo exchange, y reacciona solo:
+
+| Evento de G6 | Acción automática | Evento que emite a su vez |
+|---|---|---|
+| `payment.approved` | Confirma la reserva del pedido (stock sale definitivo) | `StockConfirmed` |
+| `payment.rejected` | Libera la reserva (stock vuelve a disponible) | `InventoryReleased` (lo recibe G5) |
+
+Esto cierra el hueco del flujo: G5 marca el pedido `PAID` al aprobarse el pago pero
+no confirma el stock — ahora el inventario se entera por el bus y lo hace solo
+(consistencia eventual coreografiada).
+
+- **Capa de adaptación** (`adaptPaymentEvent` en `src/events/consumer.ts`): el sobre
+  de G6 no es estándar (`eventName`/`timestamp`, sin `correlationId`); se normaliza
+  y soporta también el sobre estándar por si G6 migra.
+- **Idempotencia de consumo (caso obligatorio)**: los `eventId` procesados se
+  registran en `inventario.processed_events`; un evento re-entregado no
+  confirma/libera dos veces. Además `confirm`/`release` son idempotentes por sí
+  mismos (`FOR UPDATE` + transición condicional).
+- Pagos de pedidos sin reserva en inventario → se registran y descartan (`no aplica`).
+- Configuración: `RABBITMQ_QUEUE` (default `g7-inventory-service`).
+
 ### Integración con identidad (G2) — Fase 4
 
 Desde E4, `POST /inventory/:productId/stock` (la única vía de entrada de stock al

@@ -12,6 +12,7 @@ import inventoryRoutes from "./routes/inventory.routes";
 
 import { pingDatabase } from "./config/database";
 import { startOutboxDispatcher } from "./events/dispatcher";
+import { startPaymentsConsumer } from "./events/consumer";
 import { headersMiddleware } from "./middlewares/headers.middleware";
 import { errorMiddleware } from "./middlewares/error.middleware";
 
@@ -74,6 +75,9 @@ async function start() {
 
   // Publica los eventos del outbox a RabbitMQ (Fase 4).
   startOutboxDispatcher();
+
+  // Consume payment.approved/rejected de G6: confirma/libera reservas solo.
+  startPaymentsConsumer();
 
   app.listen(PORT, () => {
     console.log("======================================");
