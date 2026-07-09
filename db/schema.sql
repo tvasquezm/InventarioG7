@@ -35,9 +35,23 @@ CREATE TABLE IF NOT EXISTS inventario.reservations (
                     CHECK (status IN ('RESERVED','CONFIRMED','RELEASED','EXPIRED')),
     idempotency_key uuid NOT NULL UNIQUE,
     expires_at      timestamptz,
+    -- E4: business_user_id del dueño del pedido (formato USR-01 de G2).
+    -- Llega en el body del reserve (v1.6) o del OrderCreated de G5.
+    -- Lo requiere G9 en el payload de StockRejected v1.1.
+    user_id         text,
+    -- E4: UUID interno de la orden en G5 (su OrderCreated lo trae).
+    -- G5 nos llama por orderNumber pero en el bus la orden viaja como
+    -- UUID: con ambos, los eventos de pago se resuelven venga el que venga.
+    order_uuid      uuid,
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now()
 );
+
+-- Migracion idempotente para BDs creadas antes de E4.
+ALTER TABLE inventario.reservations ADD COLUMN IF NOT EXISTS user_id text;
+ALTER TABLE inventario.reservations ADD COLUMN IF NOT EXISTS order_uuid uuid;
+CREATE INDEX IF NOT EXISTS idx_reservations_order_uuid
+    ON inventario.reservations(order_uuid);
 
 -- ------------------------------------------------------
 -- reservation_items: items de cada reserva (reserva por lote)

@@ -20,6 +20,9 @@ export interface ReserveStockRequest {
   items: ReservationItem[];
   ttlMinutes?: number;
   correlationId: string;
+  // business_user_id del comprador (USR-01 de G2). Opcional (v1.6):
+  // G5 lo envia para que StockRejected pueda incluirlo (lo pide G9).
+  userId?: string;
 }
 
 export interface ReserveStockResult {
@@ -47,8 +50,8 @@ export class ReservationService {
       orderId,
       idempotencyKey,
       items,
-      ttlMinutes = DEFAULT_RESERVATION_TTL_MINUTES,
-      correlationId
+      correlationId,
+      userId
     } = request;
 
     // ========================================
@@ -57,6 +60,10 @@ export class ReservationService {
 
     if (!orderId || orderId.trim().length === 0) {
       throw new ApiError(400, "INVALID_ORDER_ID", "orderId is required.");
+    }
+
+    if (userId !== undefined && typeof userId !== "string") {
+      throw new ApiError(400, "INVALID_USER_ID", "userId must be a string when provided.");
     }
 
     if (!idempotencyKey || idempotencyKey.trim().length === 0) {
@@ -87,8 +94,11 @@ export class ReservationService {
       // El rechazo por falta de stock SI se publica (fuera de la
       // transaccion abortada: el outbox de una tx con ROLLBACK no existe).
       if (error instanceof ApiError && error.code === "OUT_OF_STOCK") {
+        // v1.1: incluye userId (si G5 lo mando en el reserve) para que
+        // G9 sepa a quien notificar el rechazo.
         await publisher.publishStockRejected(correlationId, {
           orderId,
+          userId: userId?.trim() || null,
           reason: error.message,
           items
         });
@@ -106,7 +116,8 @@ export class ReservationService {
       idempotencyKey,
       items,
       ttlMinutes = DEFAULT_RESERVATION_TTL_MINUTES,
-      correlationId
+      correlationId,
+      userId
     } = request;
 
     return withTransaction(async (client) => {
@@ -193,7 +204,9 @@ export class ReservationService {
         items: reservedItems,
         expiresAt,
         createdAt: now,
-        updatedAt: now
+        updatedAt: now,
+        userId: userId?.trim() || null,
+        orderUuid: null
       };
 
       await repository.insertReservation(reservation, client);

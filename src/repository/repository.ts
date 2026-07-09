@@ -38,6 +38,10 @@ export interface Reservation {
   expiresAt: Date;
   createdAt: Date;
   updatedAt: Date;
+  // business_user_id del dueño del pedido (USR-01 de G2); puede faltar.
+  userId: string | null;
+  // UUID interno de la orden en G5 (llega por su OrderCreated).
+  orderUuid: string | null;
 }
 
 export interface InventoryView {
@@ -279,17 +283,25 @@ class Repository {
       items: await this.loadItems(r.reservation_id, db),
       expiresAt: r.expires_at,
       createdAt: r.created_at,
-      updatedAt: r.updated_at
+      updatedAt: r.updated_at,
+      userId: r.user_id ?? null,
+      orderUuid: r.order_uuid ?? null
     };
   }
 
+  /**
+   * Busca por CUALQUIERA de los dos identificadores de orden del
+   * ecosistema: el orderNumber ("ORD-...", con el que G5 nos llama por
+   * REST) o el UUID interno de la orden en G5 (con el que la orden viaja
+   * en el bus). Asi los eventos de pago se resuelven venga el que venga.
+   */
   async getReservation(
     orderId: string,
     db: Db = pool
   ): Promise<Reservation | undefined> {
     const res = await db.query(
       `SELECT * FROM ${S}.reservations
-        WHERE order_id = $1
+        WHERE order_id = $1 OR order_uuid::text = $1
         ORDER BY created_at DESC
         LIMIT 1`,
       [orderId]
@@ -312,7 +324,7 @@ class Repository {
   ): Promise<Reservation | undefined> {
     const res = await db.query(
       `SELECT * FROM ${S}.reservations
-        WHERE order_id = $1
+        WHERE order_id = $1 OR order_uuid::text = $1
         ORDER BY created_at DESC
         LIMIT 1
         FOR UPDATE`,
@@ -345,14 +357,15 @@ class Repository {
   ): Promise<void> {
     await db.query(
       `INSERT INTO ${S}.reservations
-         (reservation_id, order_id, status, idempotency_key, expires_at, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+         (reservation_id, order_id, status, idempotency_key, expires_at, user_id, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         reservation.reservationId,
         reservation.orderId,
         reservation.status,
         reservation.idempotencyKey,
         reservation.expiresAt,
+        reservation.userId,
         reservation.createdAt,
         reservation.updatedAt
       ]
@@ -371,6 +384,32 @@ class Repository {
         ]
       );
     }
+  }
+
+  /**
+   * Enlaza la reserva con los datos del OrderCreated de G5: el UUID
+   * interno de su orden y el userId (business_user_id) del comprador.
+   * Busca por reservationId (nuestra PK, viene en su payload) o por
+   * orderNumber. COALESCE: no pisa un user_id que ya llego por el reserve.
+   * Devuelve false si ninguna reserva calza (orden ajena al inventario).
+   */
+  async linkOrderReference(
+    reservationId: string | null,
+    orderNumber: string | null,
+    orderUuid: string | null,
+    userId: string | null,
+    db: Db = pool
+  ): Promise<boolean> {
+    const res = await db.query(
+      `UPDATE ${S}.reservations
+          SET order_uuid = COALESCE(order_uuid, $3::uuid),
+              user_id    = COALESCE(user_id, $4),
+              updated_at = now()
+        WHERE ($1::uuid IS NOT NULL AND reservation_id = $1::uuid)
+           OR ($2::text IS NOT NULL AND order_id = $2)`,
+      [reservationId, orderNumber, orderUuid, userId]
+    );
+    return (res.rowCount ?? 0) > 0;
   }
 
   /**

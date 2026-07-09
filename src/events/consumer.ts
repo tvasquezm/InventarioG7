@@ -32,7 +32,7 @@ import { ApiError } from "../middlewares/error.middleware";
 const RABBITMQ_URL = process.env.RABBITMQ_URL;
 const EXCHANGE = process.env.RABBITMQ_EXCHANGE || "payments.events";
 const QUEUE = process.env.RABBITMQ_QUEUE || "g7-inventory-service";
-const ROUTING_KEYS = ["payment.approved", "payment.rejected"];
+const ROUTING_KEYS = ["payment.approved", "payment.rejected", "OrderCreated"];
 const RECONNECT_MS = 5000;
 
 interface AdaptedPaymentEvent {
@@ -54,6 +54,46 @@ function adaptPaymentEvent(raw: any, routingKey: string): AdaptedPaymentEvent {
     orderId: raw.payload?.orderId ?? raw.orderId ?? null,
     paymentId: raw.payload?.paymentId ?? raw.paymentId ?? null
   };
+}
+
+/**
+ * OrderCreated de G5 (sobre estandar): enlaza la reserva con el UUID
+ * interno de la orden y el userId (business_user_id) del comprador.
+ * - order_uuid: los pagos pueden venir con este UUID en vez del
+ *   orderNumber; con ambos guardados la reserva se resuelve siempre.
+ * - user_id: alimenta el StockRejected v1.1 que necesita G9.
+ * Su payload trae reservationId (nuestra PK, devuelta por /reserve),
+ * orderNumber y orderId (UUID): enlazamos por los dos primeros.
+ */
+async function handleOrderCreated(raw: any): Promise<void> {
+
+  const eventId: string = raw.eventId ?? crypto.randomUUID();
+  const correlationId: string = raw.correlationId ?? crypto.randomUUID();
+  const p = raw.payload ?? {};
+  const tag = `[consumer] eventId=${eventId} correlationId=${correlationId}`;
+
+  if (await repository.hasProcessedEvent(eventId)) {
+    console.log(`${tag} OrderCreated duplicado: se ignora.`);
+    return;
+  }
+
+  const linked = await repository.linkOrderReference(
+    p.reservationId ?? null,
+    p.orderNumber ?? null,
+    p.orderId ?? null,
+    p.userId ?? null
+  );
+
+  if (linked) {
+    console.log(
+      `${tag} OrderCreated: reserva enlazada ` +
+      `(orderNumber=${p.orderNumber} orderUuid=${p.orderId} userId=${p.userId})`
+    );
+  } else {
+    console.log(`${tag} OrderCreated sin reserva en inventario: no aplica.`);
+  }
+
+  await repository.markProcessedEvent(eventId, "OrderCreated");
 }
 
 async function handlePaymentEvent(
@@ -143,8 +183,12 @@ async function connectAndConsume(): Promise<void> {
 
     try {
       const raw = JSON.parse(msg.content.toString());
-      const event = adaptPaymentEvent(raw, routingKey);
-      await handlePaymentEvent(routingKey, event);
+      if (routingKey === "OrderCreated") {
+        await handleOrderCreated(raw);
+      } else {
+        const event = adaptPaymentEvent(raw, routingKey);
+        await handlePaymentEvent(routingKey, event);
+      }
       channel.ack(msg);
     } catch (err: any) {
       // Mensaje ilegible o error transitorio: se descarta sin requeue

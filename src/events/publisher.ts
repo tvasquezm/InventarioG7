@@ -72,6 +72,7 @@ export class Publisher {
     await this.enqueue("StockReserved", correlationId, {
       reservationId: reservation.reservationId,
       orderId: reservation.orderId,
+      userId: reservation.userId,
       status: reservation.status,
       items: reservation.items,
       expiresAt: reservation.expiresAt
@@ -113,12 +114,13 @@ export class Publisher {
    * Reserva rechazada por falta de stock. OJO: se llama DESPUES del
    * ROLLBACK de la reserva (con pool, no con el client de la transaccion
    * abortada): el rechazo si debe publicarse aunque la reserva no exista.
+   * v1.1: incluye userId (nullable) para que G9 sepa a quien notificar.
    */
   async publishStockRejected(
     correlationId: string,
-    payload: { orderId: string; reason: string; items: any[] }
+    payload: { orderId: string; userId: string | null; reason: string; items: any[] }
   ): Promise<void> {
-    await this.enqueue("StockRejected", correlationId, payload, pool);
+    await this.enqueue("StockRejected", correlationId, payload, pool, "1.1");
   }
 
   async publishStockChanged(

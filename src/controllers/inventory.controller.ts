@@ -272,13 +272,14 @@ export class InventoryController {
         );
       }
 
-      const { orderId, items } = req.body;
+      const { orderId, items, userId } = req.body;
 
       const result = await reservationService.reserveStock({
         orderId,
         idempotencyKey,
         items,
-        correlationId
+        correlationId,
+        userId
       });
 
       const statusCode = result.isIdempotentReplay ? 200 : 201;

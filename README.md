@@ -160,7 +160,7 @@ Entrega *al menos una vez*: los consumidores deduplican por `eventId`.
 | `StockReserved` | Reserva creada | G10 |
 | `StockConfirmed` | Reserva confirmada (pago OK) | G10 |
 | `InventoryReleased` | Reserva liberada (antes `StockReleased`, renombrado para G5) | **G5** (ya suscrito), G10 |
-| `StockRejected` | Reserva rechazada por falta de stock (se publica tras el ROLLBACK) | G9 |
+| `StockRejected` **v1.1** | Reserva rechazada por falta de stock (se publica tras el ROLLBACK); incluye `userId` (nullable) para que G9 sepa a quién notificar | G9 |
 | `StockChanged` | Carga/reposición de stock (admin) | G3 (refresca `stock_visible`) |
 
 Sobre estándar del curso: `eventId`, `eventType`, `version`, `occurredAt`,
@@ -193,6 +193,22 @@ no confirma el stock — ahora el inventario se entera por el bus y lo hace solo
   mismos (`FOR UPDATE` + transición condicional).
 - Pagos de pedidos sin reserva en inventario → se registran y descartan (`no aplica`).
 - Configuración: `RABBITMQ_QUEUE` (default `g7-inventory-service`).
+
+### Consumo de `OrderCreated` (G5) e identidad del comprador — v1.6
+
+La misma cola consume el **`OrderCreated` de G5** para enlazar la reserva con los
+datos que a G7 no le llegan por REST:
+
+- **`order_uuid`**: G5 nos llama por `orderNumber` (`ORD-...`) pero en el bus su
+  orden viaja como UUID. Con ambos guardados, `confirm`/`release` y los eventos de
+  pago **resuelven la reserva venga el identificador que venga**.
+- **`user_id`**: el `business_user_id` del comprador (formato `USR-01` de G2),
+  necesario para el `StockRejected` v1.1.
+
+Además `POST /inventory/reserve` acepta **`userId` opcional** en el body (v1.6):
+es la única forma de tener el `userId` en los rechazos, porque cuando la reserva
+falla G5 **no** publica `OrderCreated` (el rechazo ocurre antes). Pedido a G5:
+incluir el campo — ya tienen el valor validado al momento de llamar.
 
 ### Integración con identidad (G2) — Fase 4
 
