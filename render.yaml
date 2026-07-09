@@ -19,7 +19,10 @@ services:
         sync: false
       - key: DB_SCHEMA
         value: inventario
-      # Broker de eventos del curso (CloudAMQP, Fase 4). Se configura en
-      # el dashboard de Render (Environment), no en el repo.
+      # Broker de eventos del curso (RabbitMQ en Railway, administrado por
+      # G5; antes CloudAMQP, migrado el 2026-07-09 al expirar su trial).
+      # La URL se configura en el dashboard de Render (Environment), no en el repo.
       - key: RABBITMQ_URL
         sync: false
+      - key: RABBITMQ_EXCHANGE
+        value: fishmarket

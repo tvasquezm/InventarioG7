@@ -165,8 +165,10 @@ curl -X POST https://inventario-g7.onrender.com/inventory/sync-catalog \
 ### Eventos reales — RabbitMQ + patrón Outbox (Fase 4)
 
 Desde E4 los eventos **se publican de verdad** al bus compartido del curso:
-**RabbitMQ en CloudAMQP, exchange topic `payments.events`** (el mismo que usan G5 y
-G6), con routing key = `eventType`. El mock de consola quedó atrás.
+**RabbitMQ en Railway (administrado por G5), exchange topic `fishmarket`** (el mismo
+que usan G5 y G6), con routing key = `eventType`. El mock de consola quedó atrás.
+(Hasta el 2026-07-09 el bus fue CloudAMQP con exchange `payments.events`; al expirar
+su trial se migró cambiando solo configuración — contrato v1.6.1.)
 
 **Patrón Outbox** (`src/events/publisher.ts` + `src/events/dispatcher.ts` + tabla
 `inventario.outbox_events`): el evento se inserta **en la misma transacción** que
@@ -185,9 +187,9 @@ Entrega *al menos una vez*: los consumidores deduplican por `eventId`.
 
 Sobre estándar del curso: `eventId`, `eventType`, `version`, `occurredAt`,
 `producer: "inventory-service"`, `correlationId`, `payload`.
-Configuración: `RABBITMQ_URL` (ver `.env.example`; en Render se define en el
-dashboard). Sin la variable, el servicio funciona igual y los eventos quedan
-encolados en el outbox hasta que haya broker.
+Configuración: `RABBITMQ_URL` y `RABBITMQ_EXCHANGE` (ver `.env.example`; en Render
+la URL se define en el dashboard). Sin `RABBITMQ_URL`, el servicio funciona igual y
+los eventos quedan encolados en el outbox hasta que haya broker.
 
 ### Consumo de eventos de pago (G6) — Fase 4
 

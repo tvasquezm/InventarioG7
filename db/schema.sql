@@ -87,8 +87,8 @@ CREATE TABLE IF NOT EXISTS inventario.stock_operations (
 -- ------------------------------------------------------
 -- outbox_events: patron Outbox (Fase 4 - eventos reales)
 -- El evento se inserta EN LA MISMA transaccion que cambia el
--- stock; un dispatcher lo publica despues a RabbitMQ (CloudAMQP,
--- exchange payments.events) y marca published_at. Garantiza que
+-- stock; un dispatcher lo publica despues a RabbitMQ (exchange
+-- compartido 'fishmarket') y marca published_at. Garantiza que
 -- no se publican eventos de transacciones que hicieron ROLLBACK
 -- (entrega al menos una vez; los consumidores deduplican por event_id).
 -- ------------------------------------------------------
