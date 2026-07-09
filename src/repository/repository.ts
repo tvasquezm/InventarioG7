@@ -387,6 +387,33 @@ class Repository {
   }
 
   /**
+   * Reclama un lote de reservas RESERVED cuyo TTL ya vencio, para el
+   * job batch de expiracion. FOR UPDATE SKIP LOCKED: si hay varias
+   * instancias del servicio, cada una procesa reservas distintas y un
+   * confirm/release concurrente sobre la misma reserva queda serializado.
+   * Usa el indice parcial idx_reservations_expires.
+   */
+  async claimExpiredReservations(
+    limit: number,
+    db: Db
+  ): Promise<Reservation[]> {
+    const res = await db.query(
+      `SELECT * FROM ${S}.reservations
+        WHERE status = 'RESERVED'
+          AND expires_at < now()
+        ORDER BY expires_at ASC
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED`,
+      [limit]
+    );
+    const out: Reservation[] = [];
+    for (const row of res.rows) {
+      out.push(await this.mapReservation(row, db));
+    }
+    return out;
+  }
+
+  /**
    * Enlaza la reserva con los datos del OrderCreated de G5: el UUID
    * interno de su orden y el userId (business_user_id) del comprador.
    * Busca por reservationId (nuestra PK, viene en su payload) o por

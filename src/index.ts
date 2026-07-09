@@ -14,6 +14,7 @@ import { catalogClient } from "./clients/catalog.client";
 import { pingDatabase } from "./config/database";
 import { startOutboxDispatcher } from "./events/dispatcher";
 import { startPaymentsConsumer } from "./events/consumer";
+import { startExpiryJob } from "./jobs/expiry.job";
 import { headersMiddleware } from "./middlewares/headers.middleware";
 import { errorMiddleware } from "./middlewares/error.middleware";
 
@@ -113,6 +114,9 @@ async function start() {
 
   // Consume payment.approved/rejected de G6: confirma/libera reservas solo.
   startPaymentsConsumer();
+
+  // Batch: expira reservas RESERVED con TTL vencido y devuelve su stock.
+  startExpiryJob();
 
   app.listen(PORT, () => {
     console.log("======================================");

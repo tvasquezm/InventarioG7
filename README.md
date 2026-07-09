@@ -230,6 +230,26 @@ es la única forma de tener el `userId` en los rechazos, porque cuando la reserv
 falla G5 **no** publica `OrderCreated` (el rechazo ocurre antes). Pedido a G5:
 incluir el campo — ya tienen el valor validado al momento de llamar.
 
+### Job batch de expiración de reservas — Fase 4
+
+Proceso **batch** periódico (`src/jobs/expiry.job.ts`, cada 60s configurable con
+`EXPIRY_INTERVAL_MS`): toma en lotes las reservas `RESERVED` cuyo TTL venció
+(`expires_at < now()`, 15 min por defecto) y, en una sola transacción por lote:
+
+1. Devuelve el stock reservado a disponible.
+2. Transiciona la reserva `RESERVED → EXPIRED` (condicional).
+3. Publica `InventoryReleased` con `reason: "EXPIRED"` vía outbox (G5/G3 se
+   enteran de que el stock volvió).
+
+- El lote se reclama con `FOR UPDATE SKIP LOCKED`: varias instancias no procesan
+  la misma reserva dos veces, y un `confirm`/`release` concurrente queda
+  serializado (el que llega tarde recibe `409 RESERVATION_NOT_ACTIVE` — un pago
+  aprobado después de la expiración se rechaza, que es lo correcto).
+- Si el stock reservado quedó inconsistente (p. ej. un `SET` admin lo reseteó),
+  se deja constancia en el log y la reserva expira igual (no reintenta por siempre).
+- En Render free el job corre mientras el servicio está despierto: el primer
+  ciclo tras despertar **se pone al día con todo lo acumulado**.
+
 ### Integración con identidad (G2) — Fase 4
 
 Desde E4, `POST /inventory/:productId/stock` (la única vía de entrada de stock al

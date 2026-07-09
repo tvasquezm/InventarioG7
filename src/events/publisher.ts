@@ -96,17 +96,21 @@ export class Publisher {
    * Liberacion de reserva. eventType/routing key: InventoryReleased
    * (nombre acordado con G5: su consumidor ya esta suscrito a esa key;
    * antes lo llamabamos StockReleased, renombrado en el contrato v1.4).
+   * El job de expiracion pasa reason "EXPIRED" (para el consumidor, una
+   * expiracion es lo mismo que una liberacion: el stock volvio).
    */
   async publishReservationReleased(
     correlationId: string,
     reservation: Reservation,
-    db: Db
+    db: Db,
+    reason?: string
   ): Promise<void> {
     await this.enqueue("InventoryReleased", correlationId, {
       reservationId: reservation.reservationId,
       orderId: reservation.orderId,
       status: reservation.status,
-      items: reservation.items
+      items: reservation.items,
+      ...(reason ? { reason } : {})
     }, db);
   }
 
