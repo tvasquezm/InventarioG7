@@ -48,6 +48,9 @@
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     background: linear-gradient(160deg, var(--bg) 0%, var(--bg-deep) 100%); z-index: 10;
   }
+  /* El display:flex de arriba le gana al atributo hidden del navegador;
+     sin esta regla, la pantalla de login nunca se oculta tras el login. */
+  #login-screen[hidden] { display: none; }
   .login-card {
     width: min(380px, 92vw); padding: 34px 30px; text-align: center;
     background: var(--card); border: 1px solid var(--border); border-radius: 16px;
