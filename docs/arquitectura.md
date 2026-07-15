@@ -64,7 +64,7 @@ flowchart TB
     %% consumidores de nuestros eventos
     EX -- "InventoryReleased" --> G5E
     EX -. "StockChanged (ofrecido:<br/>refrescar stock_visible)" .-> G3
-    EX -. "OrderRejected de G5<br/>(recomendado para notificar)" .-> G9
+    EX -- "OrderRejected de G5<br/>(rename hecho; G9 lo consumirá)" --> G9
 ```
 
 ## Decisiones clave (con su porqué)
@@ -87,5 +87,5 @@ flowchart TB
 | G3 Catálogo | REST saliente (sync) · evento `StockChanged` ofrecido | ✅ / 🟡 su consumidor pendiente |
 | G5 Pedidos | REST entrante (reserve/confirm/release) · eventos en ambos sentidos | ✅ producción |
 | G6 Payments | Eventos entrantes (approved/rejected → confirm/release automático) | ✅ producción |
-| G9 Notificaciones | Recomendado consumir `OrderRejected` de G5 (rename en curso) | 🟡 esperando a G5/G9 |
+| G9 Notificaciones | Consumirá `OrderRejected` de G5 (rename ya hecho); nuestro `StockRejected` v1.1 queda como auditoría | ✅ resuelto (implementación en G9) |
 | G10 Reportería | REST `GET /inventory` ofrecido para su low-stock real | 🟡 pendiente de ellos |
