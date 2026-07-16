@@ -12,11 +12,11 @@ flowchart TB
     subgraph clientes["Consumidores REST"]
         G5R["G5 Pedidos<br/>(order-service)"]
         ADMIN["Admin humano<br/>(UI /admin)"]
-        G10["G10 Reportería<br/>(polling ofrecido)"]
+        G10["G10 Reportería<br/>(polling cada 60s)"]
     end
 
     subgraph g7["G7 · Inventory Service — Render"]
-        API["API REST v1.6<br/>/inventory · /reserve · /confirm<br/>/release · /stock · /sync-catalog"]
+        API["API REST v1.7<br/>/inventory · /reserve · /confirm<br/>/release · /stock · /sync-catalog"]
         UI["UI /admin<br/>(login G2 + reposición)"]
         DISP["Outbox Dispatcher<br/>(cada 5s, SKIP LOCKED)"]
         CONS["Consumer<br/>payment.* · OrderCreated"]
@@ -38,9 +38,9 @@ flowchart TB
     G9["G9 Notificaciones"]
 
     %% REST entrantes
-    G5R -- "REST: reserve / confirm / release<br/>(+ userId opcional v1.6)" --> API
+    G5R -- "REST: reserve / confirm / release<br/>(+ userId v1.6 y orderUuid v1.7, opcionales)" --> API
     ADMIN -- "REST: POST /stock (Bearer admin)" --> UI --> API
-    G10 -. "REST: GET /inventory<br/>(ofrecido, pendiente de ellos)" .-> API
+    G10 -- "REST: GET /inventory cada 60s<br/>(X-Consumer: g10-reporteria)" --> API
 
     %% REST salientes
     API -- "REST: valida JWT + rol admin" --> G2
@@ -63,7 +63,7 @@ flowchart TB
 
     %% consumidores de nuestros eventos
     EX -- "InventoryReleased" --> G5E
-    EX -. "StockChanged (ofrecido:<br/>refrescar stock_visible)" .-> G3
+    EX -. "StockChanged · StockReserved<br/>InventoryReleased (su consumidor<br/>en pruebas desde 15-07)" .-> G3
     EX -- "OrderRejected de G5<br/>(rename hecho; G9 lo consumirá)" --> G9
 ```
 
@@ -84,8 +84,8 @@ flowchart TB
 | Grupo | Canal | Estado |
 |---|---|---|
 | G2 Identidad | REST saliente (validate) | ✅ producción |
-| G3 Catálogo | REST saliente (sync) · evento `StockChanged` ofrecido | ✅ / 🟡 su consumidor pendiente |
+| G3 Catálogo | REST saliente (sync) · consumen `StockChanged`, `StockReserved` e `InventoryReleased` | ✅ / 🟡 conectados al bus el 14-07, su consumidor en pruebas |
 | G5 Pedidos | REST entrante (reserve/confirm/release) · eventos en ambos sentidos | ✅ producción |
 | G6 Payments | Eventos entrantes (approved/rejected → confirm/release automático) | ✅ producción |
 | G9 Notificaciones | Consumirá `OrderRejected` de G5 (rename ya hecho); nuestro `StockRejected` v1.1 queda como auditoría | ✅ resuelto (implementación en G9) |
-| G10 Reportería | REST `GET /inventory` ofrecido para su low-stock real | 🟡 pendiente de ellos |
+| G10 Reportería | REST `GET /inventory` paginado cada 60s (`X-Consumer: g10-reporteria`) para su low-stock real | ✅ producción desde 15-07 |
