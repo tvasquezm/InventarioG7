@@ -272,10 +272,11 @@ export class InventoryController {
         );
       }
 
-      const { orderId, items, userId } = req.body;
+      const { orderId, orderUuid, items, userId } = req.body;
 
       const result = await reservationService.reserveStock({
         orderId,
+        orderUuid,
         idempotencyKey,
         items,
         correlationId,

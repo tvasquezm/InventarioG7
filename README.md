@@ -232,6 +232,13 @@ es la única forma de tener el `userId` en los rechazos, porque cuando la reserv
 falla G5 **no** publica `OrderCreated` (el rechazo ocurre antes). Pedido a G5:
 incluir el campo — ya tienen el valor validado al momento de llamar.
 
+Desde **v1.7** el reserve también acepta **`orderUuid` opcional** (el UUID
+interno de la orden en G5, PK de su tabla `orders`): la reserva queda enlazada
+al crearse, sin esperar el `OrderCreated` (que sigue como respaldo y no pisa el
+valor). Formato inválido → `400 INVALID_ORDER_UUID`. G5 ya lo envía desde su
+V7.1. Es el paso previo a migrar el `orderId` de los eventos a UUID (v2.0,
+coordinado con G5 y G3).
+
 ### Job batch de expiración de reservas — Fase 4
 
 Proceso **batch** periódico (`src/jobs/expiry.job.ts`, cada 60s configurable con

@@ -23,6 +23,11 @@ export interface ReserveStockRequest {
   // business_user_id del comprador (USR-01 de G2). Opcional (v1.6):
   // G5 lo envia para que StockRejected pueda incluirlo (lo pide G9).
   userId?: string;
+  // UUID interno de la orden en G5 (PK de su tabla orders). Opcional (v1.7):
+  // G5 lo envia en el reserve para no depender del enlace asincrono via
+  // OrderCreated. Cuando el 100% de los reserves lo traigan, los eventos
+  // podran migrar su orderId a uuid (v2.0).
+  orderUuid?: string;
 }
 
 export interface ReserveStockResult {
@@ -35,6 +40,11 @@ export interface ReserveStockResult {
 // ========================================
 
 const DEFAULT_RESERVATION_TTL_MINUTES = 15;
+
+// Formato canonico de UUID (8-4-4-4-12 hex). Un orderUuid malformado debe
+// ser 400 aqui y no un 22P02 (500) al castearlo a uuid en Postgres.
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ========================================
 // SERVICE
@@ -51,7 +61,8 @@ export class ReservationService {
       idempotencyKey,
       items,
       correlationId,
-      userId
+      userId,
+      orderUuid
     } = request;
 
     // ========================================
@@ -64,6 +75,17 @@ export class ReservationService {
 
     if (userId !== undefined && typeof userId !== "string") {
       throw new ApiError(400, "INVALID_USER_ID", "userId must be a string when provided.");
+    }
+
+    if (
+      orderUuid !== undefined &&
+      (typeof orderUuid !== "string" || !UUID_REGEX.test(orderUuid.trim()))
+    ) {
+      throw new ApiError(
+        400,
+        "INVALID_ORDER_UUID",
+        "orderUuid must be a valid UUID when provided."
+      );
     }
 
     if (!idempotencyKey || idempotencyKey.trim().length === 0) {
@@ -117,7 +139,8 @@ export class ReservationService {
       items,
       ttlMinutes = DEFAULT_RESERVATION_TTL_MINUTES,
       correlationId,
-      userId
+      userId,
+      orderUuid
     } = request;
 
     return withTransaction(async (client) => {
@@ -206,7 +229,9 @@ export class ReservationService {
         createdAt: now,
         updatedAt: now,
         userId: userId?.trim() || null,
-        orderUuid: null
+        // v1.7: si G5 lo mando en el reserve queda desde ya; si no,
+        // linkOrderReference (OrderCreated) lo rellena despues (COALESCE).
+        orderUuid: orderUuid?.trim().toLowerCase() || null
       };
 
       await repository.insertReservation(reservation, client);

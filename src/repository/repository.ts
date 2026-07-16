@@ -357,11 +357,12 @@ class Repository {
   ): Promise<void> {
     await db.query(
       `INSERT INTO ${S}.reservations
-         (reservation_id, order_id, status, idempotency_key, expires_at, user_id, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+         (reservation_id, order_id, order_uuid, status, idempotency_key, expires_at, user_id, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         reservation.reservationId,
         reservation.orderId,
+        reservation.orderUuid,
         reservation.status,
         reservation.idempotencyKey,
         reservation.expiresAt,

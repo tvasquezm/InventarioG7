@@ -524,7 +524,7 @@
     },
     "body": {
      "mode": "raw",
-     "raw": "{\n  \"orderId\": \"{{demoOrderId}}\",\n  \"userId\": \"USR-01\",\n  \"items\": [\n    { \"productId\": \"660e8400-e29b-41d4-a716-446655440111\", \"quantity\": 1 }\n  ]\n}",
+     "raw": "{\n  \"orderId\": \"{{demoOrderId}}\",\n  \"orderUuid\": \"{{$guid}}\",\n  \"userId\": \"USR-01\",\n  \"items\": [\n    { \"productId\": \"660e8400-e29b-41d4-a716-446655440111\", \"quantity\": 1 }\n  ]\n}",
      "options": {
       "raw": {
        "language": "json"

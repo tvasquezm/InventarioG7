@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Inventory Service API
-  version: "1.6.1"
+  version: "1.7"
   description: |
     Servicio de **Inventario y Concurrencia** del ecosistema Mini Marketplace Cloud
     (Grupo 7). Es la única autoridad sobre el stock de los productos: gestiona la
@@ -30,6 +30,15 @@ info:
     **Cambios v1.2 (E4):** nuevo endpoint `POST /inventory/sync-catalog`, primera
     integración REST real con G3: recorre `GET /products` del catálogo y crea el
     inventario de los productos que aún no existan (idempotente; no pisa stock).
+
+    **Cambios v1.7 (E4):** `POST /inventory/reserve` acepta `orderUuid`
+    **opcional** (UUID interno de la orden en G5, la PK de su tabla `orders`).
+    Se valida el formato (400 `INVALID_ORDER_UUID` si es inválido) y se persiste
+    en la reserva desde el momento de crearla, sin depender del enlace asíncrono
+    vía `OrderCreated` (que sigue operando como respaldo y no pisa el valor).
+    Cambio aditivo y retrocompatible. Es el paso previo a la migración del
+    `orderId` de los eventos a UUID (v2.0, coordinada con G5 y G3): se hará
+    cuando el 100% de los reserves incluyan `orderUuid`.
 
     **Cambios v1.6.1 (E4):** migración de broker. El bus compartido pasa de
     CloudAMQP (trial expirado) a **RabbitMQ en Railway administrado por G5**,
@@ -367,6 +376,7 @@ paths:
               $ref: "#/components/schemas/ReserveRequest"
             example:
               orderId: ORD-1001
+              orderUuid: "0d4b7c1e-9f2a-4d3b-8c5e-6a7f8b9c0d1e"
               userId: USR-01
               items:
                 - productId: "550e8400-e29b-41d4-a716-446655440000"
@@ -647,6 +657,15 @@ components:
           type: string
           description: Pedido al que pertenece la reserva.
           example: ORD-1001
+        orderUuid:
+          type: string
+          format: uuid
+          description: >-
+            (v1.7, opcional) UUID interno de la orden en G5 (PK de su tabla
+            orders). Si viene, la reserva queda enlazada de inmediato; si no,
+            el servicio lo captura después desde el evento OrderCreated.
+            Formato inválido responde 400 INVALID_ORDER_UUID.
+          example: "0d4b7c1e-9f2a-4d3b-8c5e-6a7f8b9c0d1e"
         userId:
           type: string
           description: >-
