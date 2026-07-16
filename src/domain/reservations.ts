@@ -116,10 +116,12 @@ export class ReservationService {
       // El rechazo por falta de stock SI se publica (fuera de la
       // transaccion abortada: el outbox de una tx con ROLLBACK no existe).
       if (error instanceof ApiError && error.code === "OUT_OF_STOCK") {
-        // v1.1: incluye userId (si G5 lo mando en el reserve) para que
-        // G9 sepa a quien notificar el rechazo.
+        // Incluye userId (si G5 lo mando en el reserve) para que G9 sepa
+        // a quien notificar el rechazo. v2.0: orderId es el uuid de G5
+        // (del body del reserve; aqui no hay reserva en BD de donde leerlo).
         await publisher.publishStockRejected(correlationId, {
-          orderId,
+          orderId: orderUuid?.trim().toLowerCase() || null,
+          orderNumber: orderId,
           userId: userId?.trim() || null,
           reason: error.message,
           items

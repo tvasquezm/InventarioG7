@@ -179,11 +179,18 @@ Entrega *al menos una vez*: los consumidores deduplican por `eventId`.
 
 | Evento | Cuándo | Consumidor esperado |
 |---|---|---|
-| `StockReserved` | Reserva creada | G10 |
-| `StockConfirmed` | Reserva confirmada (pago OK) | G10 |
-| `InventoryReleased` | Reserva liberada (antes `StockReleased`, renombrado para G5) | **G5** (ya suscrito), G10 |
-| `StockRejected` **v1.1** | Reserva rechazada por falta de stock (se publica tras el ROLLBACK); incluye `userId` (nullable) para que G9 sepa a quién notificar | G9 |
-| `StockChanged` | Carga/reposición de stock (admin) | G3 (refresca `stock_visible`) |
+| `StockReserved` **v2.0** | Reserva creada | G3, G10 |
+| `StockConfirmed` **v2.0** | Reserva confirmada (pago OK) | G10 |
+| `InventoryReleased` **v2.0** | Reserva liberada (antes `StockReleased`, renombrado para G5) | **G5** (ya suscrito), G3, G10 |
+| `StockRejected` **v2.0** | Reserva rechazada por falta de stock (se publica tras el ROLLBACK); incluye `userId` (nullable) para que G9 sepa a quién notificar | G9 |
+| `StockChanged` | Carga/reposición de stock (admin) | G3 (refresca `stock_visible` con `virtualStock`) |
+
+Desde **v2.0** (acordado con G5): en los cuatro eventos de reserva, `orderId` es
+el **UUID interno de la orden en G5** (su PK, como ya lo publican G6/G8/G9) y el
+identificador de negocio `ORD-...` viaja en el campo nuevo **`orderNumber`**.
+`orderId` puede venir `null` en reservas creadas antes de v1.7 cuyo
+`OrderCreated` nunca llegó — los consumidores deben caer a `orderNumber` en
+ese caso.
 
 Sobre estándar del curso: `eventId`, `eventType`, `version`, `occurredAt`,
 `producer: "inventory-service"`, `correlationId`, `payload`.

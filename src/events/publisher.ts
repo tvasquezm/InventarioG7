@@ -64,6 +64,12 @@ export class Publisher {
     );
   }
 
+  // v2.0 (acordado con G5): orderId pasa a ser el UUID interno de la orden
+  // en G5 (su PK, como ya lo publican G6/G8/G9) y orderNumber conserva el
+  // identificador de negocio ("ORD-..."). orderId puede ser null en reservas
+  // previas a v1.7 cuyo OrderCreated nunca llego: los consumidores deben
+  // caer a orderNumber en ese caso.
+
   async publishReservationCreated(
     correlationId: string,
     reservation: Reservation,
@@ -71,12 +77,13 @@ export class Publisher {
   ): Promise<void> {
     await this.enqueue("StockReserved", correlationId, {
       reservationId: reservation.reservationId,
-      orderId: reservation.orderId,
+      orderId: reservation.orderUuid,
+      orderNumber: reservation.orderId,
       userId: reservation.userId,
       status: reservation.status,
       items: reservation.items,
       expiresAt: reservation.expiresAt
-    }, db);
+    }, db, "2.0");
   }
 
   async publishReservationConfirmed(
@@ -86,10 +93,11 @@ export class Publisher {
   ): Promise<void> {
     await this.enqueue("StockConfirmed", correlationId, {
       reservationId: reservation.reservationId,
-      orderId: reservation.orderId,
+      orderId: reservation.orderUuid,
+      orderNumber: reservation.orderId,
       status: reservation.status,
       items: reservation.items
-    }, db);
+    }, db, "2.0");
   }
 
   /**
@@ -107,24 +115,26 @@ export class Publisher {
   ): Promise<void> {
     await this.enqueue("InventoryReleased", correlationId, {
       reservationId: reservation.reservationId,
-      orderId: reservation.orderId,
+      orderId: reservation.orderUuid,
+      orderNumber: reservation.orderId,
       status: reservation.status,
       items: reservation.items,
       ...(reason ? { reason } : {})
-    }, db);
+    }, db, "2.0");
   }
 
   /**
    * Reserva rechazada por falta de stock. OJO: se llama DESPUES del
    * ROLLBACK de la reserva (con pool, no con el client de la transaccion
    * abortada): el rechazo si debe publicarse aunque la reserva no exista.
-   * v1.1: incluye userId (nullable) para que G9 sepa a quien notificar.
+   * Como aqui no hay fila en BD, el orderId (uuid) sale del orderUuid que
+   * G5 mando en el body del reserve (null si no vino).
    */
   async publishStockRejected(
     correlationId: string,
-    payload: { orderId: string; userId: string | null; reason: string; items: any[] }
+    payload: { orderId: string | null; orderNumber: string; userId: string | null; reason: string; items: any[] }
   ): Promise<void> {
-    await this.enqueue("StockRejected", correlationId, payload, pool, "1.1");
+    await this.enqueue("StockRejected", correlationId, payload, pool, "2.0");
   }
 
   async publishStockChanged(

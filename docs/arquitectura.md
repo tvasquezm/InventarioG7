@@ -16,7 +16,7 @@ flowchart TB
     end
 
     subgraph g7["G7 · Inventory Service — Render"]
-        API["API REST v1.7<br/>/inventory · /reserve · /confirm<br/>/release · /stock · /sync-catalog"]
+        API["API REST v2.0<br/>/inventory · /reserve · /confirm<br/>/release · /stock · /sync-catalog"]
         UI["UI /admin<br/>(login G2 + reposición)"]
         DISP["Outbox Dispatcher<br/>(cada 5s, SKIP LOCKED)"]
         CONS["Consumer<br/>payment.* · OrderCreated"]
@@ -54,7 +54,7 @@ flowchart TB
     %% eventos salientes (outbox)
     API -- "escribe outbox<br/>(misma transacción)" --> INV
     INV -- "pendientes" --> DISP
-    DISP -- "StockChanged · StockReserved<br/>StockConfirmed · InventoryReleased<br/>StockRejected v1.1 (userId)" --> EX
+    DISP -- "StockChanged · StockReserved<br/>StockConfirmed · InventoryReleased<br/>StockRejected — eventos de reserva v2.0:<br/>orderId = uuid de G5 + orderNumber" --> EX
 
     %% eventos entrantes
     G6 -- "payment.approved / payment.rejected" --> EX
