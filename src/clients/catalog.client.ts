@@ -30,14 +30,16 @@ interface CatalogPage {
   totalElements: number;
 }
 
-// Fila del catalogo (snake_case) -> objeto propio (camelCase).
+// Fila del catalogo -> objeto propio. G3 ha cambiado el casing de su
+// respuesta entre versiones (snake_case y camelCase, incluso distinto
+// por endpoint), asi que se aceptan ambas formas.
 function mapProduct(p: any): CatalogProduct {
   return {
     id: p.id,
     name: p.name,
     price: p.price,
-    stockVisible: p.stock_visible,
-    isActive: p.is_active
+    stockVisible: p.stockVisible ?? p.stock_visible,
+    isActive: p.isActive ?? p.is_active
   };
 }
 
